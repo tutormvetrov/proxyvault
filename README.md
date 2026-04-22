@@ -107,6 +107,14 @@ Use the bundled GitHub Actions workflow:
 
 If the recipient has a recent MacBook on modern macOS, `arm64` is the most likely match.
 
+### Release Tags
+
+When you push or move a tag like `v1.0.0`, the workflow:
+
+- builds Windows, macOS arm64, and macOS x64 archives
+- creates the GitHub Release if it does not exist yet
+- uploads all ZIP files plus a consolidated `SHA256SUMS.txt` directly to that release
+
 ## Portable Seed Data
 
 For reproducible preloaded builds, place your current library in:
