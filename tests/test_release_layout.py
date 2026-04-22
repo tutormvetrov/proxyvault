@@ -18,6 +18,18 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ReleaseLayoutTests(unittest.TestCase):
+    @staticmethod
+    def _normalized_path(path: Path) -> Path:
+        return path.resolve(strict=False)
+
+    def assertPathEqual(self, actual: Path, expected: Path) -> None:
+        self.assertEqual(self._normalized_path(actual), self._normalized_path(expected))
+
+    def assertPathIn(self, expected: Path, candidates: list[Path]) -> None:
+        normalized_expected = self._normalized_path(expected)
+        normalized_candidates = [self._normalized_path(candidate) for candidate in candidates]
+        self.assertIn(normalized_expected, normalized_candidates)
+
     def test_runtime_directory_helpers_create_expected_portable_layout(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             fake_root = Path(temp_dir)
@@ -42,8 +54,8 @@ class ReleaseLayoutTests(unittest.TestCase):
                 executable_path=windows_executable,
                 frozen=True,
             )
-            self.assertEqual(windows_candidates[0], windows_executable.parent / "engines")
-            self.assertIn(windows_executable.parent / "_internal" / "engines", windows_candidates)
+            self.assertPathEqual(windows_candidates[0], windows_executable.parent / "engines")
+            self.assertPathIn(windows_executable.parent / "_internal" / "engines", windows_candidates)
 
             fake_app = Path(temp_dir) / "ProxyVault.app"
             macos_executable = fake_app / "Contents" / "MacOS" / "ProxyVault"
@@ -51,12 +63,12 @@ class ReleaseLayoutTests(unittest.TestCase):
                 executable_path=macos_executable,
                 frozen=True,
             )
-            self.assertEqual(
+            self.assertPathEqual(
                 macos_candidates[0],
                 fake_app / "Contents" / "Resources" / "engines",
             )
-            self.assertIn(fake_app / "Contents" / "MacOS" / "engines", macos_candidates)
-            self.assertIn(Path(temp_dir) / "engines", macos_candidates)
+            self.assertPathIn(fake_app / "Contents" / "MacOS" / "engines", macos_candidates)
+            self.assertPathIn(Path(temp_dir) / "engines", macos_candidates)
 
     def test_default_settings_point_engine_root_to_bundled_engines_directory(self) -> None:
         settings = AppSettings.default()
