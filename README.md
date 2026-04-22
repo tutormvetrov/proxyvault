@@ -100,8 +100,12 @@ Output:
 Use the bundled GitHub Actions workflow:
 
 - Workflow file: `.github/workflows/release-artifacts.yml`
-- It builds both Windows and macOS archives
-- The macOS archive is produced on a GitHub-hosted macOS runner
+- It builds the Windows archive plus two macOS archives
+- `ProxyVault-macos-arm64.zip` for Apple Silicon Macs
+- `ProxyVault-macos-x64.zip` for Intel Macs
+- This avoids fragile `universal2` packaging failures on GitHub-hosted runners
+
+If the recipient has a recent MacBook on modern macOS, `arm64` is the most likely match.
 
 ## Portable Seed Data
 

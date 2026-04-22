@@ -15,7 +15,7 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python 3.11.8
         uses: actions/setup-python@v6
@@ -40,11 +40,23 @@ jobs:
           if-no-files-found: error
 
   build-macos:
-    name: Build macOS archive
-    runs-on: macos-15
+    name: Build macOS ${{ matrix.label }} archive
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            label: arm64
+            pyinstaller_target_arch: arm64
+            release_tag: arm64
+          - runner: macos-15-intel
+            label: x64
+            pyinstaller_target_arch: x86_64
+            release_tag: x64
+    runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python 3.11.8
         uses: actions/setup-python@v6
@@ -57,6 +69,9 @@ jobs:
 
       - name: Build portable macOS archive
         shell: bash
+        env:
+          MACOS_RELEASE_TAG: ${{ matrix.release_tag }}
+          PYINSTALLER_TARGET_ARCH: ${{ matrix.pyinstaller_target_arch }}
         run: |
           chmod +x ./build-macos.sh
           ./build-macos.sh
@@ -64,8 +79,8 @@ jobs:
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ProxyVault-macos-universal2
+          name: ProxyVault-macos-${{ matrix.release_tag }}
           path: |
-            release/ProxyVault-macos-universal2.zip
+            release/ProxyVault-macos-${{ matrix.release_tag }}.zip
             release/SHA256SUMS.txt
           if-no-files-found: error

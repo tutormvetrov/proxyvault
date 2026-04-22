@@ -4,9 +4,12 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT"
 
+MACOS_RELEASE_TAG="${MACOS_RELEASE_TAG:-universal2}"
+PYINSTALLER_TARGET_ARCH="${PYINSTALLER_TARGET_ARCH:-universal2}"
+
 RELEASE_DIR="$ROOT/release"
-STAGE_DIR="$RELEASE_DIR/ProxyVault-macos-universal2"
-ARCHIVE_PATH="$RELEASE_DIR/ProxyVault-macos-universal2.zip"
+STAGE_DIR="$RELEASE_DIR/ProxyVault-macos-${MACOS_RELEASE_TAG}"
+ARCHIVE_PATH="$RELEASE_DIR/ProxyVault-macos-${MACOS_RELEASE_TAG}.zip"
 DIST_DIR="$ROOT/dist-macos"
 BUILD_DIR="$ROOT/build-macos"
 DEFAULT_PORTABLE_SOURCE_DIR="$ROOT/portable-seed"
@@ -18,6 +21,10 @@ fi
 
 rm -rf "$STAGE_DIR" "$ARCHIVE_PATH" "$DIST_DIR" "$BUILD_DIR"
 mkdir -p "$RELEASE_DIR"
+
+export PYINSTALLER_TARGET_ARCH
+
+echo "Building macOS release tag=${MACOS_RELEASE_TAG} target_arch=${PYINSTALLER_TARGET_ARCH}"
 
 python3 -m pip install -r requirements-build.txt
 

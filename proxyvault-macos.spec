@@ -1,5 +1,9 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+import os
+
+
+target_arch = os.environ.get('PYINSTALLER_TARGET_ARCH') or 'universal2'
 
 a = Analysis(
     ['main.py'],
@@ -29,7 +33,7 @@ exe = EXE(
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
-    target_arch='universal2',
+    target_arch=target_arch,
     codesign_identity=None,
     entitlements_file=None,
 )
