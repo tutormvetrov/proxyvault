@@ -13,6 +13,7 @@ class PortablePathTests(unittest.TestCase):
     def test_windows_frozen_candidate_uses_executable_directory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            expected_root = root.resolve()
             exe_path = root / "ProxyVault.exe"
             exe_path.write_text("", encoding="utf-8")
             (root / PORTABLE_MARKER_NAME).write_text("", encoding="utf-8")
@@ -20,13 +21,14 @@ class PortablePathTests(unittest.TestCase):
             candidates = portable_root_candidates(executable_path=exe_path, frozen=True)
             detected = detect_portable_app_dir(executable_path=exe_path, frozen=True)
 
-            self.assertEqual(candidates[0], root)
-            self.assertEqual(detected, root)
-            self.assertEqual(default_db_path(executable_path=exe_path, frozen=True), root / "proxyvault.db")
+            self.assertEqual(candidates[0], expected_root)
+            self.assertEqual(detected, expected_root)
+            self.assertEqual(default_db_path(executable_path=exe_path, frozen=True), expected_root / "proxyvault.db")
 
     def test_macos_bundle_candidate_uses_parent_of_app_bundle(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             stage_root = Path(tmp) / "ProxyVault-macos-universal2"
+            expected_stage_root = stage_root.resolve()
             macos_dir = stage_root / "ProxyVault.app" / "Contents" / "MacOS"
             macos_dir.mkdir(parents=True, exist_ok=True)
             exe_path = macos_dir / "ProxyVault"
@@ -35,7 +37,7 @@ class PortablePathTests(unittest.TestCase):
 
             detected = detect_portable_app_dir(executable_path=exe_path, frozen=True)
 
-            self.assertEqual(detected, stage_root)
+            self.assertEqual(detected, expected_stage_root)
 
     def test_macos_bundle_seed_bootstraps_home_storage_when_sidecar_data_is_missing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
