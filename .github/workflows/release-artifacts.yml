@@ -151,6 +151,7 @@ jobs:
       - name: Create release if missing
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
         shell: bash
         run: |
           gh release view "${{ steps.tag.outputs.tag }}" >/dev/null 2>&1 || \
@@ -159,6 +160,7 @@ jobs:
       - name: Upload release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
         shell: bash
         run: |
           gh release upload "${{ steps.tag.outputs.tag }}" \
