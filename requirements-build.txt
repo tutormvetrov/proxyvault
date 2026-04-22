@@ -1,0 +1,8 @@
+PyQt6==6.10.2
+qrcode[pil]==7.4.2
+Pillow==12.2.0
+cryptography==46.0.7
+requests==2.33.1
+PyYAML==6.0.3
+pyinstaller==6.19.0
+pip-audit==2.9.0
