@@ -95,6 +95,26 @@ class AmneziaWGHelperWindowsTests(unittest.TestCase):
         self.assertEqual(payload["reason_code"], "tunnel_exited_early")
         self.assertIn("disappeared right after install", payload["last_error"])
 
+    def test_cmd_up_returns_bundle_incomplete_when_bundled_runtime_is_missing(self) -> None:
+        helper_dir = self.temp_path / "helper"
+        helper_dir.mkdir(parents=True)
+        self.module._helper_directory = lambda: helper_dir
+        self.module.locate_amneziawg_exe = lambda: None
+
+        args = argparse.Namespace(
+            config=str(self.config_path),
+            log=str(self.log_path),
+            tunnel_name="pvawg-deadbeef-123456",
+            elevation_flow=False,
+        )
+
+        exit_code = self.module.cmd_up(args)
+
+        self.assertEqual(exit_code, 1)
+        payload = self.captured["payload"]
+        self.assertEqual(payload["reason_code"], "bundle_incomplete")
+        self.assertIn("bundled AmneziaWG runtime files are missing", payload["last_error"])
+
     def test_collect_install_failure_diagnostics_detects_split_tunnel_conflict(self) -> None:
         self.module.query_service_text = lambda service_name: "OpenService FAILED 1060: The specified service does not exist."
         self.module.list_related_services_text = lambda: (

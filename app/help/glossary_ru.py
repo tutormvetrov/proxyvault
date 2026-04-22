@@ -44,7 +44,7 @@ ERROR_GLOSSARY_RU: dict[str, dict[str, str]] = {
     "runtime_bundle_incomplete": {
         "title": "Сборка неполная",
         "summary": "В текущем релизе не хватает bundled runtime-пакета или его checksum не совпадает с ожидаемой.",
-        "next_step": "Возьмите полный релиз ProxyVault или пересоберите его с pinned WireGuard bootstrap payload и актуальным bundle лицензий.",
+        "next_step": "Возьмите полный релиз ProxyVault или пересоберите его с pinned runtime-пакетами и актуальным bundle лицензий.",
     },
     "invalid_configuration": {
         "title": "Конфигурация неполная или повреждена",

@@ -25,5 +25,22 @@
       "url": "https://download.wireguard.com/windows-client/wireguard-amd64-0.6.1.msi",
       "sha256": "3721a8f12b0b8ed4d9a3120b0438ebc034ea36057d8256a88e57a773e6f46ff8"
     }
+  },
+  "amneziawg": {
+    "windows_amd64": {
+      "version": "2.0.0",
+      "runtime_dir": "engines/amneziawg/windows/AmneziaWG",
+      "files": {
+        "amneziawg.exe": {
+          "sha256": "5b00905ed02619fe149ceafc898e79993d4455a0cdfa92072b3bb9aee7b2d537"
+        },
+        "awg.exe": {
+          "sha256": "26ac0be14a8353eacf2f933736f6f7912f89ec7c59c4190cc990492934c74537"
+        },
+        "wintun.dll": {
+          "sha256": "e5da8447dc2c320edc0fc52fa01885c103de8c118481f683643cacc3220dafce"
+        }
+      }
+    }
   }
 }

@@ -44,7 +44,7 @@ ERROR_GLOSSARY_EN: dict[str, dict[str, str]] = {
     "runtime_bundle_incomplete": {
         "title": "The build is incomplete",
         "summary": "This release is missing a bundled runtime payload, or the shipped checksum no longer matches the pinned expectation.",
-        "next_step": "Use a complete ProxyVault release or rebuild it with the pinned WireGuard bootstrap payload and the runtime notice bundle.",
+        "next_step": "Use a complete ProxyVault release or rebuild it with the pinned runtime payloads and the runtime notice bundle.",
     },
     "invalid_configuration": {
         "title": "The configuration is incomplete or damaged",

@@ -34,9 +34,14 @@ class ReleaseBundleTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
 
-    def _wireguard_manifest(self) -> dict[str, object]:
+    def _runtime_manifest(self) -> dict[str, object]:
         installer_bytes = b"wireguard-msi-payload"
         installer_hash = hashlib.sha256(installer_bytes).hexdigest()
+        amneziawg_bytes = {
+            "amneziawg.exe": b"amneziawg-runtime",
+            "awg.exe": b"awg-runtime",
+            "wintun.dll": b"wintun-runtime",
+        }
         return {
             "wireguard": {
                 "windows_amd64": {
@@ -45,13 +50,29 @@ class ReleaseBundleTests(unittest.TestCase):
                     "sha256": installer_hash,
                     "url": "https://example.com/wireguard-test.msi",
                 }
+            },
+            "amneziawg": {
+                "windows_amd64": {
+                    "version": "test",
+                    "runtime_dir": "engines/amneziawg/windows/AmneziaWG",
+                    "files": {
+                        name: {"sha256": hashlib.sha256(payload).hexdigest()}
+                        for name, payload in amneziawg_bytes.items()
+                    },
+                }
             }
         }
 
     def _populate_windows_stage(self, stage_dir: Path) -> None:
-        manifest = self._wireguard_manifest()
+        manifest = self._runtime_manifest()
         installer_name = manifest["wireguard"]["windows_amd64"]["archive_name"]
         installer_hash = manifest["wireguard"]["windows_amd64"]["sha256"]
+        amneziawg_dir = manifest["amneziawg"]["windows_amd64"]["runtime_dir"]
+        amneziawg_payloads = {
+            f"{amneziawg_dir}/amneziawg.exe": b"amneziawg-runtime",
+            f"{amneziawg_dir}/awg.exe": b"awg-runtime",
+            f"{amneziawg_dir}/wintun.dll": b"wintun-runtime",
+        }
         for relpath in self.module.windows_stage_required_relpaths(manifest):
             target = stage_dir / relpath
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -69,6 +90,8 @@ class ReleaseBundleTests(unittest.TestCase):
                     ),
                     encoding="utf-8",
                 )
+            elif relpath.as_posix() in amneziawg_payloads:
+                target.write_bytes(amneziawg_payloads[relpath.as_posix()])
             elif relpath.name == "proxyvault.portable":
                 target.write_text("", encoding="utf-8")
             else:
@@ -84,7 +107,7 @@ class ReleaseBundleTests(unittest.TestCase):
         stage_dir = self.temp_path / "ProxyVault-win-x64"
         stage_dir.mkdir(parents=True)
         self._populate_windows_stage(stage_dir)
-        self.module.load_runtime_manifest = self._wireguard_manifest
+        self.module.load_runtime_manifest = self._runtime_manifest
 
         self.module.validate_release_stage(platform_name="windows", stage_dir=stage_dir)
 
@@ -92,7 +115,7 @@ class ReleaseBundleTests(unittest.TestCase):
         stage_dir = self.temp_path / "ProxyVault-win-x64"
         stage_dir.mkdir(parents=True)
         self._populate_windows_stage(stage_dir)
-        self.module.load_runtime_manifest = self._wireguard_manifest
+        self.module.load_runtime_manifest = self._runtime_manifest
         wrong_platform = stage_dir / "engines" / "sing-box" / "macos" / "sing-box"
         wrong_platform.parent.mkdir(parents=True, exist_ok=True)
         wrong_platform.write_text("bad", encoding="utf-8")
@@ -106,7 +129,7 @@ class ReleaseBundleTests(unittest.TestCase):
         stage_dir = self.temp_path / "ProxyVault-win-x64"
         stage_dir.mkdir(parents=True)
         self._populate_windows_stage(stage_dir)
-        self.module.load_runtime_manifest = self._wireguard_manifest
+        self.module.load_runtime_manifest = self._runtime_manifest
         archive_path = self.temp_path / "ProxyVault-win-x64.zip"
 
         with zipfile.ZipFile(archive_path, "w") as archive:
@@ -115,6 +138,19 @@ class ReleaseBundleTests(unittest.TestCase):
                     archive.write(path, arcname=f"{stage_dir.name}/{path.relative_to(stage_dir).as_posix()}")
 
         self.module.validate_release_archive(platform_name="windows", archive_path=archive_path)
+
+    def test_validate_release_stage_rejects_corrupt_amneziawg_payload(self) -> None:
+        stage_dir = self.temp_path / "ProxyVault-win-x64"
+        stage_dir.mkdir(parents=True)
+        self._populate_windows_stage(stage_dir)
+        self.module.load_runtime_manifest = self._runtime_manifest
+        corrupt = stage_dir / "engines" / "amneziawg" / "windows" / "AmneziaWG" / "amneziawg.exe"
+        corrupt.write_bytes(b"corrupt")
+
+        with self.assertRaises(self.module.ReleaseBundleError) as error:
+            self.module.validate_release_stage(platform_name="windows", stage_dir=stage_dir)
+
+        self.assertIn("AmneziaWG runtime payload checksum", str(error.exception))
 
     def test_validate_release_stage_rejects_windows_payload_inside_macos_bundle(self) -> None:
         stage_dir = self.temp_path / "ProxyVault-macos-universal2"

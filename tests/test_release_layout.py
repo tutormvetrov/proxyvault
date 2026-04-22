@@ -36,15 +36,15 @@ class ReleaseLayoutTests(unittest.TestCase):
             self.assertEqual(directories["engines"], default_engine_root_dir())
 
     def test_default_engine_root_candidates_prefer_bundled_paths_for_frozen_layouts(self) -> None:
-        windows_executable = Path("C:/ProxyVault/ProxyVault.exe")
-        windows_candidates = default_engine_root_candidates(
-            executable_path=windows_executable,
-            frozen=True,
-        )
-        self.assertEqual(windows_candidates[0], windows_executable.parent / "engines")
-        self.assertIn(windows_executable.parent / "_internal" / "engines", windows_candidates)
-
         with tempfile.TemporaryDirectory() as temp_dir:
+            windows_executable = Path(temp_dir) / "ProxyVault" / "ProxyVault.exe"
+            windows_candidates = default_engine_root_candidates(
+                executable_path=windows_executable,
+                frozen=True,
+            )
+            self.assertEqual(windows_candidates[0], windows_executable.parent / "engines")
+            self.assertIn(windows_executable.parent / "_internal" / "engines", windows_candidates)
+
             fake_app = Path(temp_dir) / "ProxyVault.app"
             macos_executable = fake_app / "Contents" / "MacOS" / "ProxyVault"
             macos_candidates = default_engine_root_candidates(
@@ -262,6 +262,27 @@ class ReleaseLayoutTests(unittest.TestCase):
         self.assertIn("\"archive_name\": \"wireguard-amd64-0.6.1.msi\"", manifest)
         self.assertIn("https://download.wireguard.com/windows-client/wireguard-amd64-0.6.1.msi", manifest)
         self.assertIn("3721a8f12b0b8ed4d9a3120b0438ebc034ea36057d8256a88e57a773e6f46ff8", manifest)
+        self.assertIn("\"amneziawg\"", manifest)
+        self.assertIn("\"version\": \"2.0.0\"", manifest)
+        self.assertIn("\"runtime_dir\": \"engines/amneziawg/windows/AmneziaWG\"", manifest)
+        self.assertIn("5b00905ed02619fe149ceafc898e79993d4455a0cdfa92072b3bb9aee7b2d537", manifest)
+        self.assertIn("26ac0be14a8353eacf2f933736f6f7912f89ec7c59c4190cc990492934c74537", manifest)
+        self.assertIn("e5da8447dc2c320edc0fc52fa01885c103de8c118481f683643cacc3220dafce", manifest)
+
+    def test_gitignore_keeps_amneziawg_runtime_payload_trackable(self) -> None:
+        gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
+
+        self.assertIn("!engines/amneziawg/windows/AmneziaWG/amneziawg.exe", gitignore)
+        self.assertIn("!engines/amneziawg/windows/AmneziaWG/awg.exe", gitignore)
+        self.assertIn("!engines/amneziawg/windows/AmneziaWG/wintun.dll", gitignore)
+
+    def test_release_workflow_does_not_duplicate_release_runs(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "release-artifacts.yml").read_text(encoding="utf-8")
+
+        self.assertIn("push:", workflow)
+        self.assertIn("workflow_dispatch:", workflow)
+        self.assertNotIn("\n  release:\n", workflow)
+        self.assertNotIn("github.event_name == 'release'", workflow)
 
     def test_manual_acceptance_checklist_covers_release_layout_and_helper_review(self) -> None:
         checklist = (ROOT / "docs" / "client-mode-ru-rollout" / "80-manual-acceptance-checklist.md").read_text(

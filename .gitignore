@@ -21,5 +21,17 @@ build-wireguard-helper/
 engines/
 .cache/
 
+!engines/
+engines/*
+!engines/amneziawg/
+engines/amneziawg/*
+!engines/amneziawg/windows/
+engines/amneziawg/windows/*
+!engines/amneziawg/windows/AmneziaWG/
+engines/amneziawg/windows/AmneziaWG/*
+!engines/amneziawg/windows/AmneziaWG/amneziawg.exe
+!engines/amneziawg/windows/AmneziaWG/awg.exe
+!engines/amneziawg/windows/AmneziaWG/wintun.dll
+
 .DS_Store
 Thumbs.db

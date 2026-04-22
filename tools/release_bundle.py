@@ -34,6 +34,26 @@ def _wireguard_windows_bootstrap(manifest: dict[str, object]) -> dict[str, str]:
     }
 
 
+def _amneziawg_windows_runtime(manifest: dict[str, object]) -> dict[str, object]:
+    payload = manifest["amneziawg"]["windows_amd64"]
+    base_dir = PurePosixPath(str(payload["runtime_dir"]))
+    file_entries = payload["files"]
+    if not isinstance(file_entries, dict):
+        raise ReleaseBundleError("AmneziaWG manifest payload is malformed: files must be an object.")
+    files: dict[PurePosixPath, str] = {}
+    for file_name, metadata in file_entries.items():
+        if not isinstance(metadata, dict):
+            raise ReleaseBundleError(f"AmneziaWG manifest payload for {file_name} is malformed.")
+        sha256 = str(metadata.get("sha256", "")).lower()
+        if not sha256:
+            raise ReleaseBundleError(f"AmneziaWG manifest payload for {file_name} is missing sha256.")
+        files[base_dir / str(file_name)] = sha256
+    return {
+        "version": str(payload["version"]),
+        "files": files,
+    }
+
+
 def _license_stage_relpaths() -> tuple[PurePosixPath, ...]:
     relpaths: list[PurePosixPath] = []
     for path in sorted(LICENSES_SOURCE_DIR.rglob("*")):
@@ -44,6 +64,7 @@ def _license_stage_relpaths() -> tuple[PurePosixPath, ...]:
 
 def windows_repo_payload_relpaths(manifest: dict[str, object] | None = None) -> tuple[PurePosixPath, ...]:
     manifest = manifest or load_runtime_manifest()
+    amneziawg = _amneziawg_windows_runtime(manifest)
     bootstrap = _wireguard_windows_bootstrap(manifest)
     return (
         PurePosixPath("engines/sing-box/windows/sing-box.exe"),
@@ -52,9 +73,7 @@ def windows_repo_payload_relpaths(manifest: dict[str, object] | None = None) -> 
         PurePosixPath("engines/wireguard/windows/wireguard-bootstrap.json"),
         PurePosixPath("engines/wireguard/windows") / bootstrap["installer_name"],
         PurePosixPath("engines/amneziawg/windows/proxyvault-amneziawg-windows.exe"),
-        PurePosixPath("engines/amneziawg/windows/AmneziaWG/amneziawg.exe"),
-        PurePosixPath("engines/amneziawg/windows/AmneziaWG/awg.exe"),
-        PurePosixPath("engines/amneziawg/windows/AmneziaWG/wintun.dll"),
+        *tuple(amneziawg["files"].keys()),
     )
 
 
@@ -238,6 +257,39 @@ def _validate_wireguard_bootstrap_from_archive(archive_path: Path, manifest: dic
             raise ReleaseBundleError("Archived WireGuard bootstrap payload checksum does not match the pinned manifest.")
 
 
+def _validate_amneziawg_payload_from_stage(stage_dir: Path, manifest: dict[str, object]) -> None:
+    payload = _amneziawg_windows_runtime(manifest)
+    for relpath, expected_sha in payload["files"].items():
+        file_path = stage_dir / Path(relpath.as_posix())
+        if not file_path.exists():
+            raise ReleaseBundleError(f"Missing staged AmneziaWG runtime payload: {file_path}")
+        if _sha256_path(file_path) != expected_sha:
+            raise ReleaseBundleError(
+                f"Staged AmneziaWG runtime payload checksum does not match the pinned manifest: {relpath.as_posix()}"
+            )
+
+
+def _validate_amneziawg_payload_from_archive(archive_path: Path, manifest: dict[str, object]) -> None:
+    payload = _amneziawg_windows_runtime(manifest)
+    with zipfile.ZipFile(archive_path) as archive:
+        names = [name for name in archive.namelist() if name and not name.endswith("/")]
+        if not names:
+            raise ReleaseBundleError(f"Release archive is empty: {archive_path}")
+        prefix = ""
+        prefixes = {PurePosixPath(name).parts[0] for name in names if len(PurePosixPath(name).parts) > 1}
+        if len(prefixes) == 1:
+            prefix = next(iter(prefixes)) + "/"
+        for relpath, expected_sha in payload["files"].items():
+            archive_name = prefix + relpath.as_posix()
+            if archive_name not in names:
+                raise ReleaseBundleError(f"Missing AmneziaWG runtime payload inside archive: {archive_name}")
+            if _sha256_bytes(archive.read(archive_name)) != expected_sha:
+                raise ReleaseBundleError(
+                    "Archived AmneziaWG runtime payload checksum does not match the pinned manifest: "
+                    + relpath.as_posix()
+                )
+
+
 def validate_release_stage(*, platform_name: str, stage_dir: Path) -> None:
     manifest = load_runtime_manifest()
     actual = _stage_files(stage_dir)
@@ -250,6 +302,7 @@ def validate_release_stage(*, platform_name: str, stage_dir: Path) -> None:
         raise ReleaseBundleError("Staged release contains wrong-platform payloads:\n" + "\n".join(path.as_posix() for path in disallowed))
     if platform_name == "windows":
         _validate_wireguard_bootstrap_from_stage(stage_dir, manifest)
+        _validate_amneziawg_payload_from_stage(stage_dir, manifest)
 
 
 def validate_release_archive(*, platform_name: str, archive_path: Path) -> None:
@@ -264,6 +317,7 @@ def validate_release_archive(*, platform_name: str, archive_path: Path) -> None:
         raise ReleaseBundleError("Release archive contains wrong-platform payloads:\n" + "\n".join(path.as_posix() for path in disallowed))
     if platform_name == "windows":
         _validate_wireguard_bootstrap_from_archive(archive_path, manifest)
+        _validate_amneziawg_payload_from_archive(archive_path, manifest)
 
 
 def parse_args() -> argparse.Namespace:

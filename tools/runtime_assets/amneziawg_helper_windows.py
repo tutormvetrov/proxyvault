@@ -149,6 +149,17 @@ def locate_awg_exe() -> Path | None:
     return None
 
 
+def _bundled_runtime_missing_message() -> str:
+    helper_dir = _helper_directory()
+    runtime_dir = helper_dir / "AmneziaWG"
+    missing = [name for name in ("amneziawg.exe", "awg.exe", "wintun.dll") if not (runtime_dir / name).exists()]
+    missing_text = ", ".join(missing) if missing else "amneziawg.exe, awg.exe, wintun.dll"
+    return (
+        "ProxyVault build is incomplete: bundled AmneziaWG runtime files are missing next to the helper "
+        f"({missing_text})."
+    )
+
+
 @dataclass(slots=True)
 class CommandResult:
     exit_code: int
@@ -617,8 +628,8 @@ def cmd_up(args: argparse.Namespace) -> int:
     amneziawg_exe = locate_amneziawg_exe()
     if amneziawg_exe is None:
         return fail(
-            reason_code="helper_not_found",
-            message="AmneziaWG for Windows is not installed. Install the official AmneziaWG client first.",
+            reason_code="bundle_incomplete",
+            message=_bundled_runtime_missing_message(),
             log_path=log_path,
         )
 
@@ -686,8 +697,8 @@ def cmd_down(args: argparse.Namespace) -> int:
     amneziawg_exe = locate_amneziawg_exe()
     if amneziawg_exe is None:
         return fail(
-            reason_code="helper_not_found",
-            message="AmneziaWG for Windows is not installed. Install the official AmneziaWG client first.",
+            reason_code="bundle_incomplete",
+            message=_bundled_runtime_missing_message(),
             log_path=log_path,
         )
 
