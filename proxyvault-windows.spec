@@ -1,5 +1,10 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+from pathlib import Path
+
+
+ROOT = Path.cwd()
+
 
 a = Analysis(
     ['main.py'],

@@ -1,0 +1,42 @@
+from __future__ import annotations
+
+from enum import Enum
+
+
+class RuntimeState(str, Enum):
+    DISCONNECTED = "DISCONNECTED"
+    STARTING = "STARTING"
+    RUNNING = "RUNNING"
+    STOPPING = "STOPPING"
+    ERROR = "ERROR"
+
+
+class RuntimeEngineKind(str, Enum):
+    SING_BOX = "SING_BOX"
+    WIREGUARD_WINDOWS = "WIREGUARD_WINDOWS"
+    WIREGUARD_MACOS = "WIREGUARD_MACOS"
+    AMNEZIAWG_WINDOWS = "AMNEZIAWG_WINDOWS"
+    AMNEZIAWG_MACOS = "AMNEZIAWG_MACOS"
+    UNSUPPORTED = "UNSUPPORTED"
+
+
+class RouteOwnerKind(str, Enum):
+    NONE = "NONE"
+    PROXY = "PROXY"
+    WIREGUARD = "WIREGUARD"
+
+
+class SystemProxyState(str, Enum):
+    CLEAR = "CLEAR"
+    APPLIED = "APPLIED"
+    ERROR = "ERROR"
+
+
+class SessionStopReason(str, Enum):
+    USER_REQUEST = "USER_REQUEST"
+    ENGINE_EXIT = "ENGINE_EXIT"
+    ENGINE_CRASH = "ENGINE_CRASH"
+    APP_EXIT = "APP_EXIT"
+    ROUTE_TAKEN_BY_WIREGUARD = "ROUTE_TAKEN_BY_WIREGUARD"
+    PRIMARY_SWITCH = "PRIMARY_SWITCH"
+    UNSUPPORTED = "UNSUPPORTED"

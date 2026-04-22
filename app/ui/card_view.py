@@ -15,7 +15,10 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from app.models import ProxyEntry, TYPE_COLORS, TYPE_LABELS, TYPE_SOFT_COLORS, TYPE_TEXT_COLORS
+from app.i18n import build_reachability_copy, format_proxy_type, tr
+from app.models import ProxyEntry, TYPE_COLORS, TYPE_SOFT_COLORS, TYPE_TEXT_COLORS
+from app.runtime.models import RunningSession, RuntimeHumanStatus
+from app.ui.i18n_patch import RuntimePresentation, ensure_ui_translations, present_runtime_state, tooltip_text
 from app.ui.theme import refresh_widget_style
 
 
@@ -55,17 +58,32 @@ def _primary_support_text(entry: ProxyEntry) -> str:
     if not title:
         return entry.display_host_port
     if title == host and entry.server_port:
-        return f"Port {entry.server_port}"
+        return tr("card.meta.port", value=entry.server_port)
     if title == host_port and entry.server_host:
-        return f"Host {entry.server_host}"
+        return tr("card.meta.host", value=entry.server_host)
     return entry.display_host_port
 
 
 class EntryCardWidget(QFrame):
-    def __init__(self, entry: ProxyEntry, mode: str, parent: QWidget | None = None):
+    def __init__(
+        self,
+        entry: ProxyEntry,
+        mode: str,
+        *,
+        runtime_session: RunningSession | None = None,
+        human_status: RuntimeHumanStatus | None = None,
+        failure_reason: str = "",
+        client_mode_enabled: bool = True,
+        parent: QWidget | None = None,
+    ):
         super().__init__(parent)
+        ensure_ui_translations()
         self.entry = entry
         self.mode = mode
+        self.runtime_session = runtime_session
+        self.human_status = human_status
+        self.failure_reason = failure_reason
+        self.client_mode_enabled = client_mode_enabled
         self.setObjectName("entryCard")
         self.setProperty("selected", False)
         self.setProperty("problem", entry.expires_soon)
@@ -99,7 +117,7 @@ class EntryCardWidget(QFrame):
         pixmap = (
             QPixmap(self.entry.qr_png_path)
             if self.entry.qr_png_path and Path(self.entry.qr_png_path).exists()
-            else _placeholder_pixmap(self.entry.type.value)
+            else _placeholder_pixmap(getattr(self.entry.type, "value", ""))
         )
         thumb.setPixmap(
             pixmap.scaled(78, 78, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
@@ -129,7 +147,7 @@ class EntryCardWidget(QFrame):
         chip_row.setSpacing(6)
         chip_row.setContentsMargins(0, 0, 0, 0)
 
-        badge = QLabel(TYPE_LABELS.get(self.entry.type, self.entry.type.value))
+        badge = QLabel(format_proxy_type(self.entry.type))
         badge.setObjectName("typeBadge")
         badge.setStyleSheet(
             "QLabel#typeBadge {"
@@ -152,9 +170,16 @@ class EntryCardWidget(QFrame):
         primary_support.setToolTip(self.entry.display_host_port)
         header_info.addWidget(primary_support)
 
-        transport = QLabel(_compact_text(self.entry.transport or "transport unknown", 24 if self.mode == "grid" else 36))
+        transport_text = self.entry.transport or present_runtime_state(
+            session=None,
+            snapshot=None,
+            human_status=None,
+        ).action
+        if not self.entry.transport:
+            transport_text = tr("card.meta.transport_unknown")
+        transport = QLabel(_compact_text(transport_text, 24 if self.mode == "grid" else 36))
         transport.setObjectName("cardMetaPrimary")
-        transport.setToolTip(self.entry.transport or "transport unknown")
+        transport.setToolTip(transport_text)
         header_info.addWidget(transport)
 
         if self.entry.tags:
@@ -166,28 +191,57 @@ class EntryCardWidget(QFrame):
         header_row.addLayout(header_info, 1)
         root.addLayout(header_row)
 
+        runtime_copy = self._runtime_copy()
+        runtime_row = QHBoxLayout()
+        runtime_row.setSpacing(8)
+        runtime_pill = QLabel(runtime_copy.status_label)
+        runtime_pill.setObjectName("cardStatusPill")
+        runtime_pill.setProperty("statusTone", runtime_copy.tone)
+        runtime_pill.setToolTip(tooltip_text("runtime.status.hint"))
+        runtime_row.addWidget(runtime_pill, 0, Qt.AlignmentFlag.AlignLeft)
+
+        runtime_hint = QLabel(_compact_text(runtime_copy.hint, 34 if self.mode == "grid" else 56))
+        runtime_hint.setObjectName("cardStatusHint")
+        runtime_hint.setToolTip(runtime_copy.summary)
+        runtime_row.addWidget(runtime_hint, 1)
+        root.addLayout(runtime_row)
+
+        reachability_copy = build_reachability_copy(self.entry)
         reachability_row = QHBoxLayout()
         reachability_row.setSpacing(8)
-        reachability = QLabel(self.entry.reachability_card_label)
+        reachability = QLabel(reachability_copy.card_label)
         reachability.setObjectName("cardStatusPill")
         reachability.setProperty("statusTone", self.entry.reachability_tone)
+        reachability.setToolTip(tooltip_text("reachability.tooltip"))
         reachability_row.addWidget(reachability, 0, Qt.AlignmentFlag.AlignLeft)
 
-        freshness = QLabel(self.entry.reachability_card_hint)
+        freshness = QLabel(reachability_copy.card_hint)
         freshness.setObjectName("cardStatusHint")
+        freshness.setToolTip(tooltip_text("reachability.tooltip"))
         reachability_row.addWidget(freshness, 1)
         root.addLayout(reachability_row)
 
         if self.entry.expires_soon:
-            warning = QLabel(f"Expires soon: {self.entry.expiry_date}")
+            warning = QLabel(tr("card.meta.expires_soon", value=self.entry.expiry_date))
             warning.setObjectName("warningPill")
             root.addWidget(warning, 0, Qt.AlignmentFlag.AlignLeft)
         elif self.entry.expiry_date:
-            expiry = QLabel(f"Expiry: {self.entry.expiry_date}")
+            expiry = QLabel(tr("card.meta.expiry", value=self.entry.expiry_date))
             expiry.setObjectName("cardMetaSecondary")
             root.addWidget(expiry)
 
         root.addStretch(1)
+
+    def _runtime_copy(self) -> RuntimePresentation:
+        unsupported = getattr(self.entry.type, "value", "") == "OTHER"
+        return present_runtime_state(
+            session=self.runtime_session,
+            snapshot=None,
+            human_status=self.human_status,
+            failure_reason=self.failure_reason,
+            client_mode_enabled=self.client_mode_enabled,
+            unsupported=unsupported,
+        )
 
     def set_selected(self, selected: bool) -> None:
         self.setProperty("selected", selected)
@@ -226,8 +280,13 @@ class CardView(QWidget):
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
+        ensure_ui_translations()
         self.mode = "grid"
         self.entries: list[ProxyEntry] = []
+        self._runtime_by_entry_id: dict[str, RunningSession] = {}
+        self._human_status_by_entry_id: dict[str, RuntimeHumanStatus] = {}
+        self._failure_by_entry_id: dict[str, str] = {}
+        self._client_mode_enabled = True
         self.setObjectName("cardViewRoot")
         self.list_widget = QListWidget()
         self.list_widget.setObjectName("cardList")
@@ -260,6 +319,25 @@ class CardView(QWidget):
         current_ids = self.selected_ids()
         self.set_entries(self.entries, selected_ids=current_ids)
 
+    def set_runtime_context(
+        self,
+        *,
+        sessions_by_entry_id: dict[str, RunningSession],
+        human_status_by_entry_id: dict[str, RuntimeHumanStatus],
+        failures_by_entry_id: dict[str, str],
+        client_mode_enabled: bool,
+    ) -> None:
+        self._runtime_by_entry_id = dict(sessions_by_entry_id)
+        self._human_status_by_entry_id = dict(human_status_by_entry_id)
+        self._failure_by_entry_id = dict(failures_by_entry_id)
+        self._client_mode_enabled = client_mode_enabled
+        selected_ids = self.selected_ids()
+        self.set_entries(self.entries, selected_ids=selected_ids)
+
+    def retranslate_ui(self) -> None:
+        selected_ids = self.selected_ids()
+        self.set_entries(self.entries, selected_ids=selected_ids)
+
     def set_entries(self, entries: list[ProxyEntry], selected_ids: list[str] | None = None) -> None:
         self.entries = list(entries)
         selected_ids = selected_ids or []
@@ -267,9 +345,19 @@ class CardView(QWidget):
         for entry in entries:
             item = QListWidgetItem()
             item.setData(Qt.ItemDataRole.UserRole, entry.id)
-            item.setSizeHint(QSize(286, 168) if self.mode == "grid" else QSize(448, 124))
+            item.setSizeHint(QSize(286, 196) if self.mode == "grid" else QSize(448, 146))
             self.list_widget.addItem(item)
-            self.list_widget.setItemWidget(item, EntryCardWidget(entry, self.mode))
+            self.list_widget.setItemWidget(
+                item,
+                EntryCardWidget(
+                    entry,
+                    self.mode,
+                    runtime_session=self._runtime_by_entry_id.get(entry.id),
+                    human_status=self._human_status_by_entry_id.get(entry.id),
+                    failure_reason=self._failure_by_entry_id.get(entry.id, ""),
+                    client_mode_enabled=self._client_mode_enabled,
+                ),
+            )
             if entry.id in selected_ids:
                 item.setSelected(True)
         self._sync_selection_states()

@@ -6,6 +6,7 @@ from enum import Enum
 from typing import Any
 
 from app.paths import default_qr_output_dir
+from app.runtime.paths import default_engine_root_dir
 
 
 class ProxyType(str, Enum):
@@ -15,6 +16,7 @@ class ProxyType(str, Enum):
     HYSTERIA2 = "HYSTERIA2"
     NAIVE_PROXY = "NAIVE_PROXY"
     WIREGUARD = "WIREGUARD"
+    AMNEZIAWG = "AMNEZIAWG"
     SHADOWSOCKS = "SHADOWSOCKS"
     TROJAN = "TROJAN"
     OTHER = "OTHER"
@@ -27,6 +29,7 @@ TYPE_LABELS = {
     ProxyType.HYSTERIA2: "Hysteria2",
     ProxyType.NAIVE_PROXY: "NaiveProxy",
     ProxyType.WIREGUARD: "WireGuard",
+    ProxyType.AMNEZIAWG: "AmneziaWG",
     ProxyType.SHADOWSOCKS: "Shadowsocks",
     ProxyType.TROJAN: "Trojan",
     ProxyType.OTHER: "Other",
@@ -40,6 +43,7 @@ TYPE_COLORS = {
     ProxyType.HYSTERIA2: "#D08E66",
     ProxyType.NAIVE_PROXY: "#90A8D7",
     ProxyType.WIREGUARD: "#9FB37D",
+    ProxyType.AMNEZIAWG: "#6EA89E",
     ProxyType.SHADOWSOCKS: "#C98579",
     ProxyType.TROJAN: "#8EA4AA",
     ProxyType.OTHER: "#B39E88",
@@ -53,6 +57,7 @@ TYPE_SOFT_COLORS = {
     ProxyType.HYSTERIA2: "#F7EADF",
     ProxyType.NAIVE_PROXY: "#EAF0FB",
     ProxyType.WIREGUARD: "#EEF3E4",
+    ProxyType.AMNEZIAWG: "#E6F2EF",
     ProxyType.SHADOWSOCKS: "#F7E8E4",
     ProxyType.TROJAN: "#EAF0F1",
     ProxyType.OTHER: "#F1E8DE",
@@ -66,6 +71,7 @@ TYPE_TEXT_COLORS = {
     ProxyType.HYSTERIA2: "#8A6149",
     ProxyType.NAIVE_PROXY: "#5F7096",
     ProxyType.WIREGUARD: "#64724E",
+    ProxyType.AMNEZIAWG: "#4B6E68",
     ProxyType.SHADOWSOCKS: "#835C54",
     ProxyType.TROJAN: "#5B6A70",
     ProxyType.OTHER: "#6F6152",
@@ -82,9 +88,18 @@ class ReachabilityState(str, Enum):
     NOT_TESTED = "NOT_TESTED"
     REACHABLE = "REACHABLE"
     FAILED = "FAILED"
+    NOT_APPLICABLE = "NOT_APPLICABLE"
 
 
 REACHABILITY_STALE_AFTER = timedelta(hours=12)
+TCP_PROBE_UNSUPPORTED_TYPES = frozenset(
+    {
+        ProxyType.HYSTERIA2,
+        ProxyType.WIREGUARD,
+        ProxyType.AMNEZIAWG,
+    }
+)
+TCP_PROBE_UNSUPPORTED_TRANSPORT_MARKERS = ("udp", "quic")
 
 
 @dataclass(slots=True)
@@ -98,6 +113,7 @@ class ReachabilityCheck:
     failure_reason: str = ""
     error_category: str = ""
     details: str = ""
+    log_path: str = ""
     config_fingerprint: str = ""
     id: int = 0
 
@@ -111,6 +127,8 @@ class ReachabilityCheck:
             return "success"
         if self.status == ReachabilityState.FAILED:
             return "danger"
+        if self.status == ReachabilityState.NOT_APPLICABLE:
+            return "warning"
         return "muted"
 
     @property
@@ -119,6 +137,8 @@ class ReachabilityCheck:
             return "Reachable"
         if self.status == ReachabilityState.FAILED:
             return "Failed"
+        if self.status == ReachabilityState.NOT_APPLICABLE:
+            return "Not applicable"
         return "Not tested"
 
 
@@ -198,9 +218,18 @@ class ProxyEntry:
         return bool(self.reachability_checked_at) and self.reachability_status != ReachabilityState.NOT_TESTED
 
     @property
+    def reachability_supports_tcp_probe(self) -> bool:
+        transport = (self.transport or "").lower()
+        if self.type in TCP_PROBE_UNSUPPORTED_TYPES:
+            return False
+        return not any(marker in transport for marker in TCP_PROBE_UNSUPPORTED_TRANSPORT_MARKERS)
+
+    @property
     def reachability_is_stale(self) -> bool:
         checked_at = self.reachability_checked_at_obj
         if not checked_at or not self.reachability_has_result:
+            return False
+        if self.reachability_status == ReachabilityState.NOT_APPLICABLE:
             return False
         if self.reachability_is_config_changed:
             return True
@@ -216,6 +245,10 @@ class ProxyEntry:
 
     @property
     def reachability_display_state(self) -> str:
+        if not self.reachability_supports_tcp_probe and (
+            not self.reachability_has_result or self.reachability_status == ReachabilityState.NOT_APPLICABLE
+        ):
+            return "not_applicable"
         if not self.reachability_has_result:
             return "not_tested"
         if self.reachability_is_stale:
@@ -232,6 +265,7 @@ class ProxyEntry:
             "reachable": "success",
             "failed": "danger",
             "stale": "warning",
+            "not_applicable": "warning",
             "not_tested": "muted",
         }[self.reachability_display_state]
 
@@ -244,10 +278,16 @@ class ProxyEntry:
             return "Failed"
         if state == "stale":
             return "Stale"
+        if state == "not_applicable":
+            return "Not applicable"
         return "Not tested"
 
     @property
     def reachability_freshness_label(self) -> str:
+        if not self.reachability_supports_tcp_probe and (
+            not self.reachability_has_result or self.reachability_status == ReachabilityState.NOT_APPLICABLE
+        ):
+            return "Verify through runtime and handshake"
         if not self.reachability_has_result:
             return "Never checked"
         if self.reachability_is_stale:
@@ -259,12 +299,18 @@ class ProxyEntry:
     @property
     def reachability_last_checked_label(self) -> str:
         checked_at = self.reachability_checked_at_obj
+        if not self.reachability_supports_tcp_probe and checked_at is None:
+            return "TCP probe not used"
         if not checked_at:
             return "Never checked"
         return f"Checked {format_relative_time(checked_at)}"
 
     @property
     def reachability_card_hint(self) -> str:
+        if not self.reachability_supports_tcp_probe and (
+            not self.reachability_has_result or self.reachability_status == ReachabilityState.NOT_APPLICABLE
+        ):
+            return "Use runtime / handshake"
         if not self.reachability_has_result:
             return "No probe yet"
         if self.reachability_is_config_changed:
@@ -277,6 +323,8 @@ class ProxyEntry:
     @property
     def reachability_card_label(self) -> str:
         state = self.reachability_display_state
+        if state == "not_applicable":
+            return "UDP/QUIC"
         if state == "not_tested":
             return "Pending"
         if state == "stale":
@@ -291,19 +339,32 @@ class ProxyEntry:
 
     @property
     def reachability_detail_summary(self) -> str:
+        if not self.reachability_supports_tcp_probe and (
+            not self.reachability_has_result or self.reachability_status == ReachabilityState.NOT_APPLICABLE
+        ):
+            return (
+                "This profile uses UDP/QUIC transport. "
+                "A TCP probe is not applicable here; verify it through runtime launch and handshake."
+            )
         if not self.reachability_has_result:
             return "No TCP probe has been run for this entry yet."
         if self.reachability_display_state == "stale":
             if self.reachability_is_config_changed:
-                return "The configuration changed after the last TCP probe. Run a fresh check before trusting the old result."
-            return "The last TCP probe is stale. Run a fresh check before trusting this result."
+                if self.reachability_supports_tcp_probe:
+                    return "The configuration changed after the last TCP probe. Run a fresh check before trusting the old result."
+                return "The configuration changed after the last runtime/handshake check. Run a fresh check before trusting the old result."
+            if self.reachability_supports_tcp_probe:
+                return "The last TCP probe is stale. Run a fresh check before trusting this result."
+            return "The last runtime/handshake check is stale. Run a fresh check before trusting this result."
         if self.reachability_status == ReachabilityState.REACHABLE:
             latency = (
                 f" in {format_duration_ms(self.reachability_latency_ms)}"
                 if self.reachability_latency_ms is not None
                 else ""
             )
-            return f"TCP connection to {self.reachability_endpoint or self.display_host_port} succeeded{latency}."
+            if self.reachability_supports_tcp_probe:
+                return f"TCP connection to {self.reachability_endpoint or self.display_host_port} succeeded{latency}."
+            return f"Runtime/handshake check for {self.reachability_endpoint or self.display_host_port} succeeded{latency}."
         failure_reason = self.reachability_failure_reason or "The TCP connection could not be established."
         return failure_reason
 
@@ -348,6 +409,14 @@ class AppSettings:
     subscription_refresh_interval: str = "never"
     allow_insecure_subscription_http: bool = False
     has_seen_welcome: bool = False
+    client_mode_enabled: bool = True
+    restore_sessions_on_launch: bool = False
+    clear_system_proxy_on_exit: bool = True
+    minimize_to_tray: bool = False
+    auto_reconnect_enabled: bool = False
+    log_retention_lines: int = 400
+    engine_root_dir: str = ""
+    ui_language: str = "ru"
 
     @classmethod
     def default(cls) -> "AppSettings":
@@ -358,6 +427,14 @@ class AppSettings:
             subscription_refresh_interval="never",
             allow_insecure_subscription_http=False,
             has_seen_welcome=False,
+            client_mode_enabled=True,
+            restore_sessions_on_launch=False,
+            clear_system_proxy_on_exit=True,
+            minimize_to_tray=False,
+            auto_reconnect_enabled=False,
+            log_retention_lines=400,
+            engine_root_dir=str(default_engine_root_dir()),
+            ui_language="ru",
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -368,6 +445,14 @@ class AppSettings:
             "subscription_refresh_interval": self.subscription_refresh_interval,
             "allow_insecure_subscription_http": self.allow_insecure_subscription_http,
             "has_seen_welcome": self.has_seen_welcome,
+            "client_mode_enabled": self.client_mode_enabled,
+            "restore_sessions_on_launch": self.restore_sessions_on_launch,
+            "clear_system_proxy_on_exit": self.clear_system_proxy_on_exit,
+            "minimize_to_tray": self.minimize_to_tray,
+            "auto_reconnect_enabled": self.auto_reconnect_enabled,
+            "log_retention_lines": self.log_retention_lines,
+            "engine_root_dir": self.engine_root_dir,
+            "ui_language": self.ui_language,
         }
 
     @classmethod
@@ -384,10 +469,24 @@ class AppSettings:
                     default.subscription_refresh_interval,
                 )
             ),
-            allow_insecure_subscription_http=bool(
+            allow_insecure_subscription_http=coerce_bool(
                 payload.get("allow_insecure_subscription_http", default.allow_insecure_subscription_http)
             ),
-            has_seen_welcome=bool(payload.get("has_seen_welcome", False)),
+            has_seen_welcome=coerce_bool(payload.get("has_seen_welcome", default.has_seen_welcome)),
+            client_mode_enabled=coerce_bool(payload.get("client_mode_enabled", default.client_mode_enabled)),
+            restore_sessions_on_launch=coerce_bool(
+                payload.get("restore_sessions_on_launch", default.restore_sessions_on_launch)
+            ),
+            clear_system_proxy_on_exit=coerce_bool(
+                payload.get("clear_system_proxy_on_exit", default.clear_system_proxy_on_exit)
+            ),
+            minimize_to_tray=coerce_bool(payload.get("minimize_to_tray", default.minimize_to_tray)),
+            auto_reconnect_enabled=coerce_bool(
+                payload.get("auto_reconnect_enabled", default.auto_reconnect_enabled)
+            ),
+            log_retention_lines=coerce_int(payload.get("log_retention_lines"), default.log_retention_lines),
+            engine_root_dir=str(payload.get("engine_root_dir", default.engine_root_dir) or default.engine_root_dir),
+            ui_language=str(payload.get("ui_language", default.ui_language) or default.ui_language),
         )
 
 
@@ -445,3 +544,24 @@ def format_relative_time(value: datetime) -> str:
 
 def utc_now_iso() -> str:
     return datetime.utcnow().replace(microsecond=0).isoformat()
+
+
+def coerce_bool(value: Any, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off", ""}:
+            return False
+    return bool(value)
+
+
+def coerce_int(value: Any, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default

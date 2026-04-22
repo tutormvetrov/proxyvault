@@ -57,6 +57,36 @@ class ReachabilityModelTests(unittest.TestCase):
         self.assertEqual(entry.reachability_freshness_label, "Needs recheck after config change")
         self.assertIn("configuration changed", entry.reachability_detail_summary.lower())
 
+    def test_udp_profiles_without_runtime_result_remain_not_applicable(self) -> None:
+        entry = build_entry(
+            type=ProxyType.WIREGUARD,
+            transport="udp",
+            server_port=51820,
+            reachability_status=ReachabilityState.NOT_APPLICABLE,
+        )
+
+        self.assertFalse(entry.reachability_supports_tcp_probe)
+        self.assertEqual(entry.reachability_display_state, "not_applicable")
+        self.assertEqual(entry.reachability_tone, "warning")
+        self.assertEqual(entry.reachability_card_label, "UDP/QUIC")
+        self.assertIn("udp/quic", entry.reachability_detail_summary.lower())
+
+    def test_udp_profiles_can_surface_real_runtime_failure_results(self) -> None:
+        entry = build_entry(
+            type=ProxyType.AMNEZIAWG,
+            transport="udp",
+            server_port=51820,
+            reachability_status=ReachabilityState.FAILED,
+            reachability_failure_reason="Handshake not observed",
+            reachability_method="Runtime and Handshake",
+        )
+
+        self.assertFalse(entry.reachability_supports_tcp_probe)
+        self.assertEqual(entry.reachability_display_state, "failed")
+        self.assertEqual(entry.reachability_tone, "danger")
+        self.assertEqual(entry.reachability_card_label, "Failed")
+        self.assertIn("handshake", entry.reachability_detail_summary.lower())
+
 
 if __name__ == "__main__":
     unittest.main()

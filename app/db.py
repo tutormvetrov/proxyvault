@@ -25,6 +25,8 @@ from app.models import (
 )
 from app.paths import HOME_APP_DIR, default_db_path, default_qr_output_dir, is_portable_runtime, resolve_app_dir
 from app.parser import parse_proxy_text
+from app.runtime.models import RuntimePrefs, SessionHistoryRecord
+from app.runtime.paths import default_engine_root_dir
 
 
 DEFAULT_APP_DIR = resolve_app_dir()
@@ -154,15 +156,58 @@ class DatabaseManager:
                     failure_reason TEXT NOT NULL DEFAULT '',
                     error_category TEXT NOT NULL DEFAULT '',
                     details TEXT NOT NULL DEFAULT '',
+                    log_path TEXT NOT NULL DEFAULT '',
                     config_fingerprint TEXT NOT NULL DEFAULT '',
                     FOREIGN KEY(entry_id) REFERENCES entries(id) ON DELETE CASCADE
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_reachability_checks_entry_id
                     ON reachability_checks (entry_id, checked_at DESC);
+
+                CREATE TABLE IF NOT EXISTS entry_runtime_prefs (
+                    entry_id TEXT PRIMARY KEY,
+                    auto_launch INTEGER NOT NULL DEFAULT 0,
+                    preferred_primary INTEGER NOT NULL DEFAULT 0,
+                    http_port_override INTEGER,
+                    socks_port_override INTEGER,
+                    last_used_at TEXT NOT NULL DEFAULT '',
+                    last_error TEXT NOT NULL DEFAULT '',
+                    FOREIGN KEY(entry_id) REFERENCES entries(id) ON DELETE CASCADE
+                );
+
+                CREATE TABLE IF NOT EXISTS session_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT NOT NULL,
+                    entry_id TEXT NOT NULL,
+                    entry_name TEXT NOT NULL DEFAULT '',
+                    engine TEXT NOT NULL,
+                    state TEXT NOT NULL,
+                    primary_flag INTEGER NOT NULL DEFAULT 0,
+                    route_owner_kind TEXT NOT NULL DEFAULT 'NONE',
+                    http_port INTEGER,
+                    socks_port INTEGER,
+                    pid_or_handle TEXT NOT NULL DEFAULT '',
+                    started_at TEXT NOT NULL DEFAULT '',
+                    stopped_at TEXT NOT NULL DEFAULT '',
+                    latency_ms INTEGER,
+                    last_handshake_at TEXT NOT NULL DEFAULT '',
+                    last_activity_at TEXT NOT NULL DEFAULT '',
+                    exit_code INTEGER,
+                    failure_reason TEXT NOT NULL DEFAULT '',
+                    short_log_excerpt TEXT NOT NULL DEFAULT '',
+                    log_path TEXT NOT NULL DEFAULT '',
+                    FOREIGN KEY(entry_id) REFERENCES entries(id) ON DELETE CASCADE
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_session_history_entry_started
+                    ON session_history (entry_id, started_at DESC);
+
+                CREATE INDEX IF NOT EXISTS idx_session_history_session_id
+                    ON session_history (session_id);
                 """
             )
             self._ensure_entry_columns()
+            self._ensure_runtime_tables()
             self._commit()
         except sqlite3.DatabaseError as exc:
             raise DatabaseInitError("ProxyVault could not initialize its database schema.", exc) from exc
@@ -189,6 +234,54 @@ class DatabaseManager:
             if column_name in columns:
                 continue
             self._connection.execute(f"ALTER TABLE entries ADD COLUMN {column_name} {definition}")
+
+    def _ensure_columns(self, table_name: str, required_columns: dict[str, str]) -> None:
+        columns = self._table_columns(table_name)
+        for column_name, definition in required_columns.items():
+            if column_name in columns:
+                continue
+            self._connection.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
+
+    def _ensure_runtime_tables(self) -> None:
+        self._ensure_columns(
+            "reachability_checks",
+            {
+                "log_path": "TEXT NOT NULL DEFAULT ''",
+            },
+        )
+        self._ensure_columns(
+            "entry_runtime_prefs",
+            {
+                "auto_launch": "INTEGER NOT NULL DEFAULT 0",
+                "preferred_primary": "INTEGER NOT NULL DEFAULT 0",
+                "http_port_override": "INTEGER",
+                "socks_port_override": "INTEGER",
+                "last_used_at": "TEXT NOT NULL DEFAULT ''",
+                "last_error": "TEXT NOT NULL DEFAULT ''",
+            },
+        )
+        self._ensure_columns(
+            "session_history",
+            {
+                "entry_name": "TEXT NOT NULL DEFAULT ''",
+                "engine": "TEXT NOT NULL DEFAULT 'UNSUPPORTED'",
+                "state": "TEXT NOT NULL DEFAULT 'DISCONNECTED'",
+                "primary_flag": "INTEGER NOT NULL DEFAULT 0",
+                "route_owner_kind": "TEXT NOT NULL DEFAULT 'NONE'",
+                "http_port": "INTEGER",
+                "socks_port": "INTEGER",
+                "pid_or_handle": "TEXT NOT NULL DEFAULT ''",
+                "started_at": "TEXT NOT NULL DEFAULT ''",
+                "stopped_at": "TEXT NOT NULL DEFAULT ''",
+                "latency_ms": "INTEGER",
+                "last_handshake_at": "TEXT NOT NULL DEFAULT ''",
+                "last_activity_at": "TEXT NOT NULL DEFAULT ''",
+                "exit_code": "INTEGER",
+                "failure_reason": "TEXT NOT NULL DEFAULT ''",
+                "short_log_excerpt": "TEXT NOT NULL DEFAULT ''",
+                "log_path": "TEXT NOT NULL DEFAULT ''",
+            },
+        )
 
     def _harden_storage_permissions(self, *extra_paths: Path) -> None:
         harden_private_storage_paths(self.db_path.parent, self.db_path, *extra_paths)
@@ -247,8 +340,9 @@ class DatabaseManager:
             self.save_settings(settings)
             return settings
         settings = AppSettings.from_dict(json.loads(raw))
+        original_payload = settings.to_dict()
         normalized = self._normalize_runtime_settings(settings)
-        if normalized.to_dict() != settings.to_dict():
+        if normalized.to_dict() != original_payload:
             self.save_settings(normalized)
         return normalized
 
@@ -256,12 +350,26 @@ class DatabaseManager:
         self._set_setting("app_settings", json.dumps(self._normalize_runtime_settings(settings).to_dict()))
 
     def _normalize_runtime_settings(self, settings: AppSettings) -> AppSettings:
+        if settings.log_retention_lines <= 0:
+            settings.log_retention_lines = AppSettings.default().log_retention_lines
+        if settings.ui_language not in {"ru", "en"}:
+            settings.ui_language = AppSettings.default().ui_language
+
+        default_engine_dir = default_engine_root_dir()
+        if not settings.engine_root_dir:
+            settings.engine_root_dir = str(default_engine_dir)
+
         if not is_portable_runtime():
             return settings
+
         portable_output = default_qr_output_dir()
         current_output = Path(settings.output_folder).expanduser() if settings.output_folder else portable_output
         if not settings.output_folder or not current_output.exists():
             settings.output_folder = str(portable_output)
+
+        current_engine_root = Path(settings.engine_root_dir).expanduser() if settings.engine_root_dir else default_engine_dir
+        if not settings.engine_root_dir or not current_engine_root.exists():
+            settings.engine_root_dir = str(default_engine_dir)
         return settings
 
     def has_master_password(self) -> bool:
@@ -554,8 +662,8 @@ class DatabaseManager:
             """
             INSERT INTO reachability_checks (
                 entry_id, checked_at, status, method, endpoint, latency_ms, duration_ms,
-                failure_reason, error_category, details, config_fingerprint
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                failure_reason, error_category, details, log_path, config_fingerprint
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 entry_id,
@@ -568,6 +676,7 @@ class DatabaseManager:
                 result.failure_reason,
                 result.error_category,
                 result.details,
+                result.log_path,
                 config_fingerprint,
             ),
         )
@@ -606,7 +715,7 @@ class DatabaseManager:
         rows = self._connection.execute(
             """
             SELECT id, checked_at, status, method, endpoint, latency_ms, duration_ms,
-                   failure_reason, error_category, details, config_fingerprint
+                   failure_reason, error_category, details, log_path, config_fingerprint
             FROM reachability_checks
             WHERE entry_id = ?
             ORDER BY checked_at DESC
@@ -626,10 +735,160 @@ class DatabaseManager:
                 failure_reason=str(row["failure_reason"]),
                 error_category=str(row["error_category"]),
                 details=str(row["details"]),
+                log_path=str(row["log_path"]),
                 config_fingerprint=str(row["config_fingerprint"]),
             )
             for row in rows
         ]
+
+    def load_runtime_prefs(self, entry_id: str) -> RuntimePrefs:
+        row = self._connection.execute(
+            """
+            SELECT entry_id, auto_launch, preferred_primary, http_port_override,
+                   socks_port_override, last_used_at, last_error
+            FROM entry_runtime_prefs
+            WHERE entry_id = ?
+            """,
+            (entry_id,),
+        ).fetchone()
+        if not row:
+            return RuntimePrefs(entry_id=entry_id)
+        return RuntimePrefs(
+            entry_id=str(row["entry_id"]),
+            auto_launch=bool(row["auto_launch"]),
+            preferred_primary=bool(row["preferred_primary"]),
+            http_port_override=row["http_port_override"],
+            socks_port_override=row["socks_port_override"],
+            last_used_at=str(row["last_used_at"]),
+            last_error=str(row["last_error"]),
+        )
+
+    def save_runtime_prefs(self, prefs: RuntimePrefs) -> None:
+        self._connection.execute(
+            """
+            INSERT INTO entry_runtime_prefs (
+                entry_id, auto_launch, preferred_primary, http_port_override,
+                socks_port_override, last_used_at, last_error
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(entry_id) DO UPDATE SET
+                auto_launch = excluded.auto_launch,
+                preferred_primary = excluded.preferred_primary,
+                http_port_override = excluded.http_port_override,
+                socks_port_override = excluded.socks_port_override,
+                last_used_at = excluded.last_used_at,
+                last_error = excluded.last_error
+            """,
+            (
+                prefs.entry_id,
+                int(prefs.auto_launch),
+                int(prefs.preferred_primary),
+                prefs.http_port_override,
+                prefs.socks_port_override,
+                prefs.last_used_at,
+                prefs.last_error,
+            ),
+        )
+        self._commit()
+
+    def list_runtime_prefs(self) -> list[RuntimePrefs]:
+        rows = self._connection.execute(
+            """
+            SELECT entry_id, auto_launch, preferred_primary, http_port_override,
+                   socks_port_override, last_used_at, last_error
+            FROM entry_runtime_prefs
+            ORDER BY last_used_at DESC, entry_id ASC
+            """
+        ).fetchall()
+        return [
+            RuntimePrefs(
+                entry_id=str(row["entry_id"]),
+                auto_launch=bool(row["auto_launch"]),
+                preferred_primary=bool(row["preferred_primary"]),
+                http_port_override=row["http_port_override"],
+                socks_port_override=row["socks_port_override"],
+                last_used_at=str(row["last_used_at"]),
+                last_error=str(row["last_error"]),
+            )
+            for row in rows
+        ]
+
+    def record_session_history(self, record: SessionHistoryRecord) -> None:
+        self._connection.execute(
+            """
+            INSERT INTO session_history (
+                session_id, entry_id, entry_name, engine, state, primary_flag,
+                route_owner_kind, http_port, socks_port, pid_or_handle, started_at,
+                stopped_at, latency_ms, last_handshake_at, last_activity_at, exit_code,
+                failure_reason, short_log_excerpt, log_path
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                record.session_id,
+                record.entry_id,
+                record.entry_name,
+                record.engine_kind,
+                record.state,
+                int(record.primary_flag),
+                record.route_owner_kind,
+                record.http_port,
+                record.socks_port,
+                record.pid_or_handle,
+                record.started_at,
+                record.stopped_at,
+                record.latency_ms,
+                record.last_handshake_at,
+                record.last_activity_at,
+                record.exit_code,
+                record.failure_reason,
+                record.short_log_excerpt,
+                record.log_path,
+            ),
+        )
+        self._commit()
+
+    def list_session_history(self, entry_id: str, limit: int = 50) -> list[SessionHistoryRecord]:
+        rows = self._connection.execute(
+            """
+            SELECT session_id, entry_id, entry_name, engine, state, primary_flag,
+                   route_owner_kind, http_port, socks_port, pid_or_handle, started_at,
+                   stopped_at, latency_ms, last_handshake_at, last_activity_at, exit_code,
+                   failure_reason, short_log_excerpt, log_path
+            FROM session_history
+            WHERE entry_id = ?
+            ORDER BY started_at DESC, id DESC
+            LIMIT ?
+            """,
+            (entry_id, limit),
+        ).fetchall()
+        return [
+            SessionHistoryRecord(
+                session_id=str(row["session_id"]),
+                entry_id=str(row["entry_id"]),
+                entry_name=str(row["entry_name"]),
+                engine_kind=str(row["engine"]),
+                state=str(row["state"]),
+                primary_flag=bool(row["primary_flag"]),
+                route_owner_kind=str(row["route_owner_kind"]),
+                http_port=row["http_port"],
+                socks_port=row["socks_port"],
+                pid_or_handle=str(row["pid_or_handle"]),
+                started_at=str(row["started_at"]),
+                stopped_at=str(row["stopped_at"]),
+                latency_ms=row["latency_ms"],
+                last_handshake_at=str(row["last_handshake_at"]),
+                last_activity_at=str(row["last_activity_at"]),
+                exit_code=row["exit_code"],
+                failure_reason=str(row["failure_reason"]),
+                short_log_excerpt=str(row["short_log_excerpt"]),
+                log_path=str(row["log_path"]),
+            )
+            for row in rows
+        ]
+
+    def clear_runtime_metadata_for_entry(self, entry_id: str) -> None:
+        self._connection.execute("DELETE FROM entry_runtime_prefs WHERE entry_id = ?", (entry_id,))
+        self._connection.execute("DELETE FROM session_history WHERE entry_id = ?", (entry_id,))
+        self._commit()
 
     def save_subscription(self, url: str, refresh_interval: str) -> SubscriptionRecord:
         record = SubscriptionRecord(

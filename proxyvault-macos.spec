@@ -1,9 +1,11 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 import os
+from pathlib import Path
 
 
 target_arch = os.environ.get('PYINSTALLER_TARGET_ARCH') or 'universal2'
+ROOT = Path.cwd()
 
 a = Analysis(
     ['main.py'],

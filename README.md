@@ -1,75 +1,139 @@
-# ProxyVault
+# ProxyVault Client Mode
 
-Local-first desktop app for storing proxy and VPN configs, previewing them as QR codes, and exporting or sharing a ready-to-use portable library.
+English version: [README.en.md](README.en.md)
 
-## What It Does
+## Что это
 
-- Saves proxy/VPN entries in a local SQLite database.
-- Detects common formats such as `vless://`, `hysteria2://`, `ss://`, `trojan://`, `https://user:pass@host:port`, and WireGuard blocks.
-- Generates QR previews and exports PNG, SVG, PDF, ZIP, and Clash YAML.
-- Imports subscription payloads from URI lists or Clash YAML.
-- Supports optional AES-256-GCM encryption at rest for saved URIs.
-- Can package a preloaded portable archive so another person gets a working app on first launch.
+ProxyVault Client Mode - это настольное приложение, которое помогает хранить свои proxy и VPN-подключения локально, быстро запускать нужный профиль и при необходимости делать его основным для системы.
 
-## Runtime Requirements
+Приложение рассчитано на обычный сценарий:
 
-- Python `3.11+`
-- Windows `10+`
-- macOS `12+`
-- Ubuntu `22.04+`
+1. Вы добавляете готовый конфиг или ссылку.
+2. Выбираете подключение в библиотеке.
+3. Нажимаете `Подключить`.
+4. Если хотите направить через него весь трафик, нажимаете `Сделать основным`.
+5. Смотрите состояние, порты, последнюю активность и подсказки в правой панели.
 
-## Quick Start
+ProxyVault не требует облачного аккаунта и хранит библиотеку на вашем устройстве. QR-коды, заметки и импортированные записи тоже остаются локально.
+
+## Как запустить
+
+### Готовый архив
+
+Если у вас уже есть релизный архив:
+
+1. Скачайте архив для своей системы.
+2. Распакуйте его в обычную папку.
+3. Запустите `ProxyVault.exe` на Windows или `ProxyVault.app` на macOS.
+4. При первом запуске добавьте своё подключение и посмотрите краткую подсказку в окне приветствия.
+
+### Запуск из исходников
+
+Нужен Python `3.11+`.
 
 ```bash
 pip install -r requirements.txt
 python main.py
 ```
 
-## Main Features
+### Где хранятся данные
 
-### Library
+По умолчанию ProxyVault сохраняет библиотеку в вашей локальной папке приложения. В portable-режиме база и QR-файлы могут лежать рядом с приложением.
 
-- Searchable catalog with grid and list views
-- Favorites, tags, expiry warnings, and sorting
-- Right-side inspector with QR preview and parsed parameters
-- Reachability checks per entry
+## Как добавить подключение
 
-### QR Workflow
+ProxyVault умеет хранить и импортировать обычные форматы конфигов и подписок, включая `vless://`, `hysteria2://`, `ss://`, `trojan://`, `naive+https://` и блоки WireGuard.
 
-- Live QR preview while editing
-- PNG and SVG export
-- Clipboard copy
-- Batch regeneration
+Для реального запуска в Client Mode v1 поддерживаются профили на базе `sing-box` и WireGuard. Неподдержанные типы и универсальные `OTHER`-записи можно держать в библиотеке, но кнопка `Подключить` для них может быть недоступна.
 
-### Security
+Самый простой путь:
 
-- Optional master password
-- AES-256-GCM encrypted URI storage
-- PBKDF2-derived key
-- HTTPS-only subscription fetching by default
-- HTTP allowed only through an explicit settings override
+1. Откройте окно добавления.
+2. Вставьте URI, блок WireGuard или содержимое подписки.
+3. Проверьте имя подключения и при желании добавьте заметку.
+4. Сохраните запись.
 
-### Sharing / Portable Mode
+Если вы копируете конфиг в буфер обмена заранее, ProxyVault может подставить его автоматически.
 
-- Windows portable archive can carry `proxyvault.db` and `qrcodes/` next to `ProxyVault.exe`
-- macOS portable archive embeds seeded data inside `ProxyVault.app`
-- On first launch, macOS can bootstrap the local library from the embedded seed
+## Как подключиться
 
-## Install Dependencies
+После добавления профиля:
 
-Runtime dependencies:
+1. Выберите его в списке или карточках.
+2. Нажмите `Подключить`.
+3. Дождитесь статуса `Подключено`.
+4. Если хотите, чтобы через этот профиль шёл системный интернет, нажмите `Сделать основным`.
 
-```bash
-pip install -r requirements.txt
-```
+Что важно понимать:
 
-Pinned build dependencies:
+- `Подключено` означает, что профиль запущен локально и у него есть рабочие локальные порты.
+- `Сделать основным` означает, что ProxyVault привяжет системный proxy к этому запущенному подключению.
+- Если профиль активен, но не сделан основным, вы всё равно можете использовать его локальный адрес вручную в другом приложении.
+- Для WireGuard поведение отдельное: он забирает маршрут на себя и не маскируется под обычный proxy-профиль.
+- В clean Windows release ProxyVault уже везёт bundled `sing-box`, bundled AmneziaWG runtime и pinned WireGuard bootstrap payload. Для первого запуска WireGuard системе может понадобиться только UAC/подтверждение ОС, но не ручная установка клиента.
+- На macOS turnkey-сценарий сейчас полный только для `sing-box`-профилей. Для WireGuard и AmneziaWG по-прежнему нужны platform tools вроде `wg-quick` / `awg-quick`.
 
-```bash
-pip install -r requirements-build.txt
-```
+## Как понять, что всё работает
 
-## Release Builds
+Ориентируйтесь на правую панель:
+
+- состояние подключения должно быть `Подключено` или `Основное`
+- должны отображаться локальные HTTP и SOCKS порты
+- время запуска и последняя активность не должны быть пустыми
+- в блоке объяснения не должно быть предупреждения об ошибке
+
+TCP-проверка помогает отдельно понять, отвечает ли удалённый сервер по сети. Это полезная диагностика, но она не заменяет статус реального запуска.
+
+## Как отключиться
+
+1. Выберите активное подключение.
+2. Нажмите `Отключить`.
+3. Убедитесь, что состояние сменилось на `Не подключено`.
+
+Если подключение было основным, ProxyVault должен снять системный proxy автоматически.
+
+## Если что-то не работает
+
+Начните с простых проверок:
+
+1. Убедитесь, что вы вставили полный конфиг без обрезанных строк и лишних пробелов.
+2. Проверьте, не занят ли локальный порт другим приложением.
+3. Посмотрите краткое объяснение ошибки в правой панели, а затем откройте технический журнал.
+4. Если не помогает, попробуйте отключить профиль и запустить его снова.
+
+Типовые ситуации:
+
+- `Сервер не отвечает`
+  Проверьте адрес, порт, интернет-соединение и доступность сервера.
+- `Не удалось запустить движок`
+  Обычно это значит, что конфиг не подошёл, не найден runtime-компонент или процесс завершился сразу после старта.
+- `Порт уже занят`
+  Закройте конфликтующее приложение или задайте другой локальный порт в настройках профиля.
+- `Данные авторизации не подошли`
+  Проверьте логин, пароль, UUID, ключи и параметры TLS.
+- `Системный proxy не удалось применить`
+  Подключение могло запуститься локально, но система не приняла его как основной маршрут.
+- `WireGuard требует подтверждения`
+  На Windows и macOS системе может понадобиться подтверждение или повышение прав.
+
+## Какой файл скачать для Mac
+
+Если вы скачиваете готовый релиз, ориентируйтесь так:
+
+- `ProxyVault-macos-arm64.zip` - для Mac с Apple Silicon: M1, M2, M3 и новее
+- `ProxyVault-macos-x64.zip` - для Intel Mac
+- `ProxyVault-macos-universal2.zip` - универсальный вариант, если он есть в релизе
+
+Как быстро понять, какой у вас Mac:
+
+1. Откройте меню Apple.
+2. Нажмите `Об этом Mac`.
+3. Посмотрите строку `Чип` или `Процессор`.
+
+Если видите `Apple M1`, `Apple M2`, `Apple M3` и похожие названия, берите `arm64`.
+Если видите `Intel`, берите `x64`.
+
+## Сборка релизов
 
 ### Windows
 
@@ -77,113 +141,38 @@ pip install -r requirements-build.txt
 ./build-windows.ps1
 ```
 
-Output:
+Для portable-архива с заранее подготовленной библиотекой используйте явный opt-in:
 
-- `release/ProxyVault-win-x64.zip`
-- `release/SHA256SUMS.txt`
+```powershell
+./build-windows.ps1 -IncludeLocalData
+```
 
 ### macOS
-
-Run on a Mac:
 
 ```bash
 ./build-macos.sh
 ```
 
-Output:
+Для macOS portable-seed тоже подключается только явно:
 
-- `release/ProxyVault-macos-universal2.zip`
-- `release/SHA256SUMS.txt`
-
-### If You Do Not Have a Mac
-
-Use the bundled GitHub Actions workflow:
-
-- Workflow file: `.github/workflows/release-artifacts.yml`
-- It builds the Windows archive plus two macOS archives
-- `ProxyVault-macos-arm64.zip` for Apple Silicon Macs
-- `ProxyVault-macos-x64.zip` for Intel Macs
-- This avoids fragile `universal2` packaging failures on GitHub-hosted runners
-
-If the recipient has a recent MacBook on modern macOS, `arm64` is the most likely match.
-
-### Release Tags
-
-When you push or move a tag like `v1.0.0`, the workflow:
-
-- builds Windows, macOS arm64, and macOS x64 archives
-- creates the GitHub Release if it does not exist yet
-- uploads all ZIP files plus a consolidated `SHA256SUMS.txt` directly to that release
-
-## Portable Seed Data
-
-For reproducible preloaded builds, place your current library in:
-
-- `portable-seed/proxyvault.db`
-- `portable-seed/qrcodes/...`
-
-The build scripts prefer `portable-seed/` over the current user profile when it exists.
-
-Refresh that seed folder from your local Windows app data:
-
-```powershell
-./prepare-portable-seed.ps1
+```bash
+INCLUDE_LOCAL_DATA=1 ./build-macos.sh
 ```
 
-## Data Locations
+Архивы и контрольные суммы попадают в папку `release/`.
 
-Default local storage:
+## Что ещё умеет ProxyVault
 
-- Database: `~/ProxyVault/proxyvault.db`
-- QR output: `~/ProxyVault/qrcodes/...`
+- хранить библиотеку подключений локально
+- импортировать подписки
+- генерировать QR-коды и экспортировать их
+- сохранять заметки, теги и избранное
+- защищать сохранённые URI мастер-паролем
+- готовить portable-архив с предзагруженной библиотекой
 
-In portable mode:
+## Важно знать
 
-- Windows uses sidecar files near `ProxyVault.exe`
-- macOS can restore seeded data from `ProxyVault.app/Contents/Resources/portable-seed`
-
-## Build Pipeline Notes
-
-Both build entrypoints:
-
-- run `pip-audit` against `requirements-build.txt`
-- run the test suite before packaging
-- produce archives under `release/`
-- generate `release/SHA256SUMS.txt`
-
-If `audit-waivers.txt` exists, every non-comment line is passed to `pip-audit --ignore-vuln`.
-
-## Project Structure
-
-```text
-main.py
-app/
-  __init__.py
-  db.py
-  models.py
-  parser.py
-  paths.py
-  qr_gen.py
-  subscriptions.py
-  ui/
-    __init__.py
-    card_view.py
-    detail_panel.py
-    dialogs.py
-    main_window.py
-    settings.py
-    sidebar.py
-    theme.py
-    workers.py
-tests/
-requirements.txt
-requirements-build.txt
-README.md
-```
-
-## Notes
-
-- If the database is corrupted, ProxyVault offers a backup-and-reset flow on launch.
-- Parsed sensitive values such as passwords, UUIDs, and login values remain visible after unlock by product decision.
-- macOS archives in this pass are unsigned and not notarized.
-- If Gatekeeper blocks first launch on macOS, open the app with right-click -> Open once.
+- ProxyVault хранит данные локально и не требует облачной синхронизации.
+- Сырые технические логи могут содержать английские строки движков. Это нормально.
+- На macOS приложение может потребовать подтверждение первого запуска.
+- Неподписанные macOS-сборки иногда нужно открыть через правый клик -> `Open`.

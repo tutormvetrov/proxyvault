@@ -49,6 +49,41 @@ PersistentKeepalive = 25
         self.assertEqual(parsed.params["endpoint"], "wg.example.com:51820")
         self.assertEqual(parsed.params["public_key"], "public-key")
 
+    def test_parse_amneziawg_block(self) -> None:
+        config = """
+[Interface]
+Address = 10.8.0.2/32
+DNS = 1.1.1.1
+PrivateKey = private-key
+Jc = 3
+Jmin = 40
+Jmax = 70
+S1 = 20
+S2 = 40
+H1 = 11111111
+H2 = 22222222
+H3 = 33333333
+H4 = 44444444
+I1 = <r 2><b 0x01020304>
+
+[Peer]
+PublicKey = public-key
+AllowedIPs = 0.0.0.0/0
+Endpoint = awg.example.com:51820
+PersistentKeepalive = 25
+""".strip()
+
+        parsed = parse_proxy_text(config)
+
+        self.assertEqual(parsed.type, ProxyType.AMNEZIAWG)
+        self.assertEqual(parsed.transport, "udp")
+        self.assertEqual(parsed.server_host, "awg.example.com")
+        self.assertEqual(parsed.server_port, 51820)
+        self.assertEqual(parsed.params["endpoint"], "awg.example.com:51820")
+        self.assertEqual(parsed.params["jc"], "3")
+        self.assertEqual(parsed.params["h4"], "44444444")
+        self.assertEqual(parsed.params["i1"], "<r 2><b 0x01020304>")
+
     def test_parse_base64_subscription_payload(self) -> None:
         ss_auth = base64.urlsafe_b64encode(b"aes-128-gcm:secret").decode("utf-8").rstrip("=")
         payload = "\n".join(

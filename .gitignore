@@ -17,6 +17,9 @@ dist/
 dist-windows/
 dist-macos/
 release/
+build-wireguard-helper/
+engines/
+.cache/
 
 .DS_Store
 Thumbs.db

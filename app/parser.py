@@ -17,9 +17,48 @@ class ParseError(ValueError):
     """Raised when a proxy configuration cannot be parsed."""
 
 
+AMNEZIAWG_INTERFACE_KEYS = frozenset(
+    {
+        "jc",
+        "jmin",
+        "jmax",
+        "s1",
+        "s2",
+        "s3",
+        "s4",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "i1",
+        "i2",
+        "i3",
+        "i4",
+        "i5",
+    }
+)
+
+
 def is_wireguard_block(text: str) -> bool:
     lowered = text.lower()
     return "[interface]" in lowered and ("[peer]" in lowered or "privatekey" in lowered)
+
+
+def load_wireguard_config(text: str) -> configparser.ConfigParser:
+    config = configparser.ConfigParser(strict=False)
+    config.optionxform = str
+    try:
+        config.read_string(text)
+    except configparser.Error as exc:
+        raise ParseError(str(exc)) from exc
+    return config
+
+
+def is_amneziawg_config(config: configparser.ConfigParser) -> bool:
+    if not config.has_section("Interface"):
+        return False
+    keys = {str(key).strip().lower() for key in config["Interface"].keys()}
+    return bool(keys & AMNEZIAWG_INTERFACE_KEYS)
 
 
 def detect_type(text: str) -> ProxyType:
@@ -41,6 +80,12 @@ def detect_type(text: str) -> ProxyType:
     if lowered.startswith("https://") and "@" in stripped:
         return ProxyType.NAIVE_PROXY
     if is_wireguard_block(stripped):
+        try:
+            config = load_wireguard_config(stripped)
+        except ParseError:
+            return ProxyType.WIREGUARD
+        if is_amneziawg_config(config):
+            return ProxyType.AMNEZIAWG
         return ProxyType.WIREGUARD
     if lowered.startswith("ss://"):
         return ProxyType.SHADOWSOCKS
@@ -66,7 +111,9 @@ def parse_proxy_text(text: str) -> ParsedConfig:
     if proxy_type == ProxyType.NAIVE_PROXY:
         return parse_naive(stripped)
     if proxy_type == ProxyType.WIREGUARD:
-        return parse_wireguard(stripped)
+        return parse_wireguard(stripped, proxy_type=ProxyType.WIREGUARD)
+    if proxy_type == ProxyType.AMNEZIAWG:
+        return parse_wireguard(stripped, proxy_type=ProxyType.AMNEZIAWG)
     if proxy_type == ProxyType.SHADOWSOCKS:
         return parse_shadowsocks(stripped)
     if proxy_type == ProxyType.TROJAN:
@@ -175,13 +222,8 @@ def parse_naive(uri: str) -> ParsedConfig:
     )
 
 
-def parse_wireguard(text: str) -> ParsedConfig:
-    config = configparser.ConfigParser(strict=False)
-    config.optionxform = str
-    try:
-        config.read_string(text)
-    except configparser.Error as exc:
-        raise ParseError(str(exc)) from exc
+def parse_wireguard(text: str, *, proxy_type: ProxyType = ProxyType.WIREGUARD) -> ParsedConfig:
+    config = load_wireguard_config(text)
     peer = config["Peer"] if config.has_section("Peer") else {}
     endpoint = str(peer.get("Endpoint", "")).strip()
     host = ""
@@ -203,9 +245,32 @@ def parse_wireguard(text: str) -> ParsedConfig:
         "allowed_ips": peer.get("AllowedIPs", ""),
         "persistent_keepalive": peer.get("PersistentKeepalive", ""),
     }
+    if proxy_type == ProxyType.AMNEZIAWG and config.has_section("Interface"):
+        interface = config["Interface"]
+        for key in (
+            "Jc",
+            "Jmin",
+            "Jmax",
+            "S1",
+            "S2",
+            "S3",
+            "S4",
+            "H1",
+            "H2",
+            "H3",
+            "H4",
+            "I1",
+            "I2",
+            "I3",
+            "I4",
+            "I5",
+        ):
+            value = str(interface.get(key, "")).strip()
+            if value:
+                params[key.lower()] = value
     params = {k: v for k, v in params.items() if v}
     return ParsedConfig(
-        type=ProxyType.WIREGUARD,
+        type=proxy_type,
         transport="udp",
         server_host=host,
         server_port=port,

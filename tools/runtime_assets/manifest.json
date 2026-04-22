@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "sing_box": {
+    "version": "1.13.10",
+    "windows_amd64": {
+      "archive_name": "sing-box-1.13.10-windows-amd64.zip",
+      "url": "https://github.com/SagerNet/sing-box/releases/download/v1.13.10/sing-box-1.13.10-windows-amd64.zip",
+      "sha256": "8753addab8536777a5599a7dc6b706f44aeb89cb158e6e7acf9e0a9ed1898530"
+    },
+    "darwin_amd64": {
+      "archive_name": "sing-box-1.13.10-darwin-amd64.tar.gz",
+      "url": "https://github.com/SagerNet/sing-box/releases/download/v1.13.10/sing-box-1.13.10-darwin-amd64.tar.gz",
+      "sha256": "6abe5c58b5809ed3cc2b20fe981a6c27f5a920247cc5c4f93a2d17e97b1c74d1"
+    },
+    "darwin_arm64": {
+      "archive_name": "sing-box-1.13.10-darwin-arm64.tar.gz",
+      "url": "https://github.com/SagerNet/sing-box/releases/download/v1.13.10/sing-box-1.13.10-darwin-arm64.tar.gz",
+      "sha256": "82ab965554e3e2bcdfcdff4a8df656ea2c3cd3ea990d28130242d7cd1a2e35a0"
+    }
+  },
+  "wireguard": {
+    "windows_amd64": {
+      "version": "0.6.1",
+      "archive_name": "wireguard-amd64-0.6.1.msi",
+      "url": "https://download.wireguard.com/windows-client/wireguard-amd64-0.6.1.msi",
+      "sha256": "3721a8f12b0b8ed4d9a3120b0438ebc034ea36057d8256a88e57a773e6f46ff8"
+    }
+  }
+}

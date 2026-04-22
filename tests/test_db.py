@@ -68,6 +68,7 @@ class DatabaseTests(unittest.TestCase):
             latency_ms=84,
             duration_ms=84,
             details="TCP probe succeeded.",
+            log_path="C:/Users/User/ProxyVault/runtime/logs/tcp-node.log",
             config_fingerprint=entry.uri_fingerprint,
         )
 
@@ -84,6 +85,7 @@ class DatabaseTests(unittest.TestCase):
         self.assertEqual(len(history), 1)
         self.assertEqual(history[0].status, ReachabilityState.REACHABLE)
         self.assertEqual(history[0].method, "TCP probe")
+        self.assertEqual(history[0].log_path, "C:/Users/User/ProxyVault/runtime/logs/tcp-node.log")
 
     def test_encrypted_storage_keeps_uri_ciphertext_at_rest(self) -> None:
         self.db.set_master_password("correct horse battery staple")
