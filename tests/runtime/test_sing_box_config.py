@@ -78,6 +78,21 @@ class SingBoxConfigBuilderTests(unittest.TestCase):
         self.assertEqual(outbound["transport"]["host"], ["cdn.example.com"])
         self.assertEqual(outbound["transport"]["path"], "/xhttp")
 
+    def test_build_vless_splithttp_config_maps_to_http_transport(self) -> None:
+        entry = _entry_from_uri(
+            "vless://11111111-1111-1111-1111-111111111111@xh.example.com:24443"
+            "?type=splithttp&security=tls&host=cdn.example.com&path=%2Fxhttp&sni=cdn.example.com"
+            "#xhttp"
+        )
+
+        outbound = build_sing_box_config(entry, http_port=18080, socks_port=11080, log_path="runtime.log")[
+            "outbounds"
+        ][0]
+
+        self.assertEqual(outbound["transport"]["type"], "http")
+        self.assertEqual(outbound["transport"]["host"], ["cdn.example.com"])
+        self.assertEqual(outbound["transport"]["path"], "/xhttp")
+
     def test_build_hysteria2_config(self) -> None:
         entry = _entry_from_uri(
             "hysteria2://secret@hy.example.com:8443"

@@ -310,10 +310,35 @@ def run_elevated_command(command: Sequence[str]) -> CommandResult:
                 pass
 
 
+def run_elevated_powershell_script(script_body: str) -> CommandResult:
+    script_fd, script_name = tempfile.mkstemp(prefix="proxyvault-amneziawg-sequence-", suffix=".ps1")
+    os.close(script_fd)
+    script_path = Path(script_name)
+    try:
+        script_path.write_text(script_body, encoding="utf-8")
+        return run_elevated_command(
+            [
+                "powershell.exe",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(script_path),
+            ]
+        )
+    finally:
+        try:
+            script_path.unlink()
+        except OSError:
+            pass
+
+
 @dataclass(slots=True)
 class ServiceState:
     state: str
     pid: int | None = None
+    service_name: str = ""
+    config_path: str = ""
 
 
 @dataclass(slots=True)
@@ -329,7 +354,7 @@ def query_service(service_name: str) -> ServiceState | None:
             "$ErrorActionPreference = 'SilentlyContinue'",
             f"$Name = {_powershell_quote(service_name)}",
             "$FilterName = $Name.Replace(\"'\", \"''\")",
-            "$service = Get-CimInstance Win32_Service -Filter (\"Name = '$FilterName'\") | Select-Object -First 1 Name, State, ProcessId, Status",
+            "$service = Get-CimInstance Win32_Service -Filter (\"Name = '$FilterName'\") | Select-Object -First 1 Name, State, ProcessId, PathName, Status",
             "if ($service) { $service | ConvertTo-Json -Compress }",
             "",
         ]
@@ -344,7 +369,146 @@ def query_service(service_name: str) -> ServiceState | None:
         pid = int(pid_value) if pid_value not in (None, "") else None
     except (TypeError, ValueError):
         pid = None
-    return ServiceState(state=state, pid=pid)
+    return ServiceState(
+        state=state,
+        pid=pid,
+        service_name=str(payload.get("Name", "")),
+        config_path=_extract_config_path_from_service_path(str(payload.get("PathName", ""))),
+    )
+
+
+def _service_handle_from_name(service_name: str) -> str:
+    prefix = "AmneziaWGTunnel$"
+    if service_name.startswith(prefix):
+        return service_name[len(prefix) :]
+    return service_name
+
+
+def _short_tunnel_entry_prefix(tunnel_name: str) -> str:
+    parts = str(tunnel_name or "").split("-")
+    if len(parts) >= 2 and parts[0] == "pvawg":
+        return f"{parts[0]}-{parts[1]}"
+    return ""
+
+
+def _extract_config_path_from_service_path(path_name: str) -> str:
+    match = re.search(r"([A-Za-z]:\\[^\"\r\n]+?\.conf)", str(path_name or ""))
+    return match.group(1) if match else ""
+
+
+def _same_config_text(left: Path, right_text: str) -> bool:
+    right = Path(right_text) if right_text else None
+    if right is None or not left.exists() or not right.exists():
+        return False
+    try:
+        return left.read_text(encoding="utf-8") == right.read_text(encoding="utf-8")
+    except OSError:
+        return False
+
+
+def list_matching_tunnel_services(tunnel_name: str) -> list[ServiceState]:
+    entry_prefix = _short_tunnel_entry_prefix(tunnel_name)
+    if not entry_prefix:
+        return []
+    pattern = f"AmneziaWGTunnel${entry_prefix}*"
+    script = "\n".join(
+        [
+            "$ErrorActionPreference = 'SilentlyContinue'",
+            f"$Pattern = {_powershell_quote(pattern)}",
+            "$services = Get-CimInstance Win32_Service | Where-Object { $_.Name -like $Pattern } | Select-Object Name, State, ProcessId, PathName",
+            "if ($services) { $services | ConvertTo-Json -Compress }",
+            "",
+        ]
+    )
+    result = _run_powershell(script)
+    payload = _parse_json_payload("\n".join(part for part in (result.stdout, result.stderr) if part).strip())
+    if isinstance(payload, dict):
+        items = [payload]
+    elif isinstance(payload, list):
+        items = [item for item in payload if isinstance(item, dict)]
+    else:
+        items = []
+
+    services: list[ServiceState] = []
+    for item in items:
+        try:
+            pid = int(item.get("ProcessId")) if item.get("ProcessId") not in (None, "") else None
+        except (TypeError, ValueError):
+            pid = None
+        services.append(
+            ServiceState(
+                state=_normalize_service_state(str(item.get("State", ""))),
+                pid=pid,
+                service_name=str(item.get("Name", "")),
+                config_path=_extract_config_path_from_service_path(str(item.get("PathName", ""))),
+            )
+        )
+    return services
+
+
+def find_reusable_running_tunnel(tunnel_name: str, config_path: Path) -> ServiceState | None:
+    for service in list_matching_tunnel_services(tunnel_name):
+        if service.state not in {"RUNNING", "START_PENDING"}:
+            continue
+        if _same_config_text(config_path, service.config_path):
+            return service
+    return None
+
+
+def cleanup_stopped_matching_tunnel_services(tunnel_name: str) -> str:
+    removed: list[str] = []
+    for service in list_matching_tunnel_services(tunnel_name):
+        if service.state in {"RUNNING", "START_PENDING"}:
+            continue
+        service_name = service.service_name
+        if not service_name:
+            continue
+        result = run_command(["sc.exe", "delete", service_name])
+        output = "\n".join(part.strip() for part in (result.stdout, result.stderr) if part.strip()).strip()
+        removed.append(f"{service_name}: {output or result.exit_code}")
+    return "\n".join(removed)
+
+
+def configure_service_manual(service_name: str) -> str:
+    result = run_command(["sc.exe", "config", service_name, "start=", "demand"])
+    return "\n".join(part.strip() for part in (result.stdout, result.stderr) if part.strip()).strip()
+
+
+def run_elevated_install_sequence(
+    *,
+    tunnel_name: str,
+    config_path: Path,
+    amneziawg_exe: Path,
+) -> CommandResult:
+    service_name = f"AmneziaWGTunnel${tunnel_name}"
+    entry_prefix = _short_tunnel_entry_prefix(tunnel_name)
+    service_pattern = f"AmneziaWGTunnel${entry_prefix}*" if entry_prefix else service_name
+    script = "\n".join(
+        [
+            "$ErrorActionPreference = 'Continue'",
+            f"$ServicePattern = {_powershell_quote(service_pattern)}",
+            f"$ServiceName = {_powershell_quote(service_name)}",
+            "$stale = Get-CimInstance Win32_Service | Where-Object {",
+            "  $_.Name -like $ServicePattern -and $_.State -notin @('Running', 'Start Pending')",
+            "}",
+            "foreach ($service in $stale) {",
+            "  Write-Output \"Deleting stale ProxyVault AmneziaWG service: $($service.Name)\"",
+            "  & sc.exe delete $service.Name | Write-Output",
+            "}",
+            "& "
+            + " ".join(
+                _powershell_quote(part)
+                for part in (str(amneziawg_exe), "/installtunnelservice", str(config_path))
+            ),
+            "$installExit = $LASTEXITCODE",
+            "if ($installExit -eq 0) {",
+            "  & sc.exe config $ServiceName start= demand | Write-Output",
+            "}",
+            "exit $installExit",
+            "",
+        ]
+    )
+    return run_elevated_powershell_script(_powershell_utf8_script(script))
 
 
 def query_service_text(service_name: str) -> str:
@@ -633,12 +797,50 @@ def cmd_up(args: argparse.Namespace) -> int:
             log_path=log_path,
         )
 
+    service_name = f"AmneziaWGTunnel${args.tunnel_name}"
+    existing_state = query_service(service_name)
+    if existing_state is not None and existing_state.state in {"RUNNING", "START_PENDING"}:
+        write_log(log_path, f"Reusing already running tunnel service {service_name}.")
+        return emit(
+            {
+                "runtime_state": "RUNNING" if existing_state.state == "RUNNING" else "STARTING",
+                "handle": args.tunnel_name,
+                "pid": existing_state.pid,
+                "last_activity_at": utc_now_iso(),
+                "last_handshake_at": latest_handshake_iso(args.tunnel_name),
+                "log_excerpt": f"Reusing already running tunnel service {service_name}.",
+            }
+        )
+
+    reusable_service = find_reusable_running_tunnel(args.tunnel_name, config_path)
+    if reusable_service is not None:
+        handle = _service_handle_from_name(reusable_service.service_name)
+        message = f"Reusing already running tunnel service {reusable_service.service_name}."
+        write_log(log_path, message)
+        return emit(
+            {
+                "runtime_state": "RUNNING" if reusable_service.state == "RUNNING" else "STARTING",
+                "handle": handle,
+                "pid": reusable_service.pid,
+                "last_activity_at": utc_now_iso(),
+                "last_handshake_at": latest_handshake_iso(handle),
+                "log_excerpt": message,
+            }
+        )
+
     note_install_attempt(log_path, args.tunnel_name, config_path)
     write_log(log_path, f"Installing tunnel service via {amneziawg_exe}", f"Config: {config_path}")
     command = [str(amneziawg_exe), "/installtunnelservice", str(config_path)]
     if args.elevation_flow and not _is_process_elevated():
-        result = run_elevated_command(command)
+        result = run_elevated_install_sequence(
+            tunnel_name=args.tunnel_name,
+            config_path=config_path,
+            amneziawg_exe=amneziawg_exe,
+        )
     else:
+        cleanup_output = cleanup_stopped_matching_tunnel_services(args.tunnel_name)
+        if cleanup_output:
+            write_log(log_path, cleanup_output)
         result = run_command(command)
     output = "\n".join(part.strip() for part in (result.stdout, result.stderr) if part.strip()).strip()
     if result.exit_code != 0:
@@ -650,7 +852,11 @@ def cmd_up(args: argparse.Namespace) -> int:
             exit_code=result.exit_code,
         )
 
-    service_name = f"AmneziaWGTunnel${args.tunnel_name}"
+    if not (args.elevation_flow and not _is_process_elevated()):
+        manual_output = configure_service_manual(service_name)
+        if manual_output:
+            write_log(log_path, manual_output)
+
     service_state = wait_for_service(service_name, desired_state="RUNNING")
     if service_state is None or service_state.state not in {"RUNNING", "START_PENDING"}:
         diagnostics = collect_install_failure_diagnostics(

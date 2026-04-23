@@ -26,6 +26,21 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(parsed.params["pbk"], "test-public-key")
         self.assertEqual(parsed.params["path"], "/gateway")
 
+    def test_parse_vless_splithttp_tls_uri_as_xhttp(self) -> None:
+        uri = (
+            "vless://4d94c6b8-4b93-48b3-949d-9d20f9757f45@xh.example.com:24443"
+            "?type=splithttp&security=tls&sni=xh.example.com&host=cdn.example.com"
+            "&path=%2Fxhttp#SplitHTTP"
+        )
+
+        parsed = parse_proxy_text(uri)
+
+        self.assertEqual(parsed.type, ProxyType.VLESS_XHTTP)
+        self.assertEqual(parsed.transport, "splithttp+tls")
+        self.assertEqual(parsed.server_host, "xh.example.com")
+        self.assertEqual(parsed.server_port, 24443)
+        self.assertEqual(parsed.display_name, "SplitHTTP")
+
     def test_parse_wireguard_block(self) -> None:
         config = """
 [Interface]

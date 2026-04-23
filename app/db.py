@@ -208,6 +208,7 @@ class DatabaseManager:
             )
             self._ensure_entry_columns()
             self._ensure_runtime_tables()
+            self._refresh_plaintext_entry_classification()
             self._commit()
         except sqlite3.DatabaseError as exc:
             raise DatabaseInitError("ProxyVault could not initialize its database schema.", exc) from exc
@@ -282,6 +283,42 @@ class DatabaseManager:
                 "log_path": "TEXT NOT NULL DEFAULT ''",
             },
         )
+
+    def _refresh_plaintext_entry_classification(self) -> None:
+        rows = self._connection.execute(
+            """
+            SELECT id, uri_plaintext, type, transport, server_host, server_port
+            FROM entries
+            WHERE uri_plaintext IS NOT NULL AND uri_plaintext != ''
+            """
+        ).fetchall()
+        for row in rows:
+            try:
+                parsed = parse_proxy_text(str(row["uri_plaintext"]))
+            except Exception:
+                continue
+            current = (
+                str(row["type"]),
+                str(row["transport"]),
+                str(row["server_host"]),
+                row["server_port"],
+            )
+            refreshed = (
+                parsed.type.value,
+                parsed.transport,
+                parsed.server_host,
+                parsed.server_port,
+            )
+            if current == refreshed:
+                continue
+            self._connection.execute(
+                """
+                UPDATE entries
+                SET type = ?, transport = ?, server_host = ?, server_port = ?
+                WHERE id = ?
+                """,
+                (*refreshed, str(row["id"])),
+            )
 
     def _harden_storage_permissions(self, *extra_paths: Path) -> None:
         harden_private_storage_paths(self.db_path.parent, self.db_path, *extra_paths)

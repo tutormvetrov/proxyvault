@@ -38,6 +38,8 @@ AMNEZIAWG_INTERFACE_KEYS = frozenset(
     }
 )
 
+VLESS_HTTP_TRANSPORT_ALIASES = frozenset({"xhttp", "splithttp", "split-http", "http", "h2"})
+
 
 def is_wireguard_block(text: str) -> bool:
     lowered = text.lower()
@@ -68,7 +70,7 @@ def detect_type(text: str) -> ProxyType:
         parsed = urlparse(stripped)
         query = parse_qs(parsed.query)
         transport = query.get("type", [""])[0].lower()
-        if transport == "xhttp":
+        if transport in VLESS_HTTP_TRANSPORT_ALIASES:
             return ProxyType.VLESS_XHTTP
         if query.get("security", [""])[0].lower() == "reality" or "reality" in stripped:
             return ProxyType.VLESS_REALITY

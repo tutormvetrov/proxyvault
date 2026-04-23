@@ -406,9 +406,9 @@ def _uses_short_amneziawg_name(engine_kind: RuntimeEngineKind | str | None) -> b
 
 
 def _build_short_amneziawg_tunnel_name(entry_id: str, session_id: str) -> str:
+    del session_id
     entry_token = _stable_hex_token(entry_id, 8)
-    session_token = _stable_hex_token(session_id, 6)
-    return f"pvawg-{entry_token}-{session_token}"
+    return f"pvawg-{entry_token}"
 
 
 def _stable_hex_token(value: str, length: int) -> str:

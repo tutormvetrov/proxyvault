@@ -70,6 +70,10 @@ class AmneziaWGHelperWindowsTests(unittest.TestCase):
 
     def test_cmd_up_returns_error_when_service_never_appears(self) -> None:
         self.module.locate_amneziawg_exe = lambda: Path("C:/Program Files/AmneziaWG/amneziawg.exe")
+        self.module.query_service = lambda service_name: None
+        self.module.find_reusable_running_tunnel = lambda tunnel_name, config_path: None
+        self.module.cleanup_stopped_matching_tunnel_services = lambda tunnel_name: ""
+        self.module.configure_service_manual = lambda service_name: ""
         self.module.run_command = lambda command: self.module.CommandResult(exit_code=0, stdout="", stderr="")
         self.module.run_elevated_command = lambda command: self.module.CommandResult(exit_code=0, stdout="", stderr="")
         self.module.wait_for_service = lambda service_name, desired_state, timeout=10.0: None
@@ -94,6 +98,66 @@ class AmneziaWGHelperWindowsTests(unittest.TestCase):
         self.assertEqual(payload["runtime_state"], "ERROR")
         self.assertEqual(payload["reason_code"], "tunnel_exited_early")
         self.assertIn("disappeared right after install", payload["last_error"])
+
+    def test_cmd_up_reuses_matching_running_tunnel(self) -> None:
+        self.module.locate_amneziawg_exe = lambda: Path("C:/Program Files/AmneziaWG/amneziawg.exe")
+        self.module.query_service = lambda service_name: None
+        self.module.find_reusable_running_tunnel = lambda tunnel_name, config_path: self.module.ServiceState(
+            state="RUNNING",
+            pid=6789,
+            service_name="AmneziaWGTunnel$pvawg-deadbeef-654321",
+            config_path=str(self.config_path),
+        )
+        self.module.latest_handshake_iso = lambda handle: "2026-04-23T11:00:00"
+        self.module.run_command = lambda command: self.fail("cmd_up should not install a duplicate service")
+
+        args = argparse.Namespace(
+            config=str(self.config_path),
+            log=str(self.log_path),
+            tunnel_name="pvawg-deadbeef-123456",
+            elevation_flow=False,
+        )
+
+        exit_code = self.module.cmd_up(args)
+
+        self.assertEqual(exit_code, 0)
+        payload = self.captured["payload"]
+        self.assertEqual(payload["runtime_state"], "RUNNING")
+        self.assertEqual(payload["handle"], "pvawg-deadbeef-654321")
+        self.assertEqual(payload["pid"], 6789)
+
+    def test_cmd_up_elevated_install_sequence_cleans_and_configures_once(self) -> None:
+        calls: list[tuple[str, Path, Path]] = []
+        self.module.locate_amneziawg_exe = lambda: Path("C:/Program Files/AmneziaWG/amneziawg.exe")
+        self.module.query_service = lambda service_name: None
+        self.module.find_reusable_running_tunnel = lambda tunnel_name, config_path: None
+        self.module._is_process_elevated = lambda: False
+        self.module.run_elevated_install_sequence = (
+            lambda *, tunnel_name, config_path, amneziawg_exe: (
+                calls.append((tunnel_name, config_path, amneziawg_exe))
+                or self.module.CommandResult(exit_code=0, stdout="installed", stderr="")
+            )
+        )
+        self.module.wait_for_service = lambda service_name, desired_state, timeout=10.0: self.module.ServiceState(
+            state="RUNNING",
+            pid=1234,
+            service_name=service_name,
+            config_path=str(self.config_path),
+        )
+        self.module.latest_handshake_iso = lambda handle: ""
+
+        args = argparse.Namespace(
+            config=str(self.config_path),
+            log=str(self.log_path),
+            tunnel_name="pvawg-deadbeef",
+            elevation_flow=True,
+        )
+
+        exit_code = self.module.cmd_up(args)
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(calls, [("pvawg-deadbeef", self.config_path, Path("C:/Program Files/AmneziaWG/amneziawg.exe"))])
+        self.assertEqual(self.captured["payload"]["runtime_state"], "RUNNING")
 
     def test_cmd_up_returns_bundle_incomplete_when_bundled_runtime_is_missing(self) -> None:
         helper_dir = self.temp_path / "helper"

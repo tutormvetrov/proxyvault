@@ -35,6 +35,8 @@ SUPPORTED_PROXY_TYPES = {
     ProxyType.NAIVE_PROXY,
 }
 
+VLESS_HTTP_TRANSPORT_ALIASES = frozenset({"xhttp", "splithttp", "split-http", "http", "h2"})
+
 
 class SingBoxConfigError(RuntimeError):
     """Raised when ProxyVault cannot translate an entry into a valid sing-box config."""
@@ -516,7 +518,7 @@ def _build_vless_transport(transport_type: str, query: dict[str, str]) -> dict[s
         if query.get("eh"):
             transport["early_data_header_name"] = query["eh"]
         return transport
-    if transport_type == "xhttp":
+    if transport_type in VLESS_HTTP_TRANSPORT_ALIASES:
         if query.get("extra"):
             raise SingBoxConfigError("XHTTP entries with extra transport payload are not supported yet.")
         transport = {"type": "http"}

@@ -124,6 +124,36 @@ class DatabaseTests(unittest.TestCase):
         assert unlocked_entry is not None
         self.assertEqual(unlocked_entry.uri, entry.uri)
 
+    def test_initialize_refreshes_plaintext_entry_classification(self) -> None:
+        uri = (
+            "vless://123e4567-e89b-12d3-a456-426614174000@xh.example.com:24443"
+            "?type=splithttp&security=tls&sni=xh.example.com&path=%2Fxhttp#XHTTP"
+        )
+        self.db.save_entry(
+            ProxyEntry(
+                id="legacy-xhttp",
+                name="Legacy XHTTP",
+                uri=uri,
+                type=ProxyType.OTHER,
+                transport="splithttp+tls",
+                server_host="xh.example.com",
+                server_port=24443,
+            )
+        )
+        self.db._connection.execute(
+            "UPDATE entries SET type = 'OTHER' WHERE id = 'legacy-xhttp'"
+        )
+        self.db._connection.commit()
+        self.db.close()
+
+        self.db = DatabaseManager(self.db_path)
+        fetched = self.db.get_entry("legacy-xhttp")
+
+        self.assertIsNotNone(fetched)
+        assert fetched is not None
+        self.assertEqual(fetched.type, ProxyType.VLESS_XHTTP)
+        self.assertEqual(fetched.transport, "splithttp+tls")
+
     def test_harden_private_storage_paths_sets_posix_modes(self) -> None:
         if os.name != "posix":
             self.skipTest("POSIX file permissions are not available on this platform.")

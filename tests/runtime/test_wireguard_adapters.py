@@ -274,9 +274,23 @@ class WireGuardAdapterTests(unittest.TestCase):
             engine_kind=RuntimeEngineKind.AMNEZIAWG_WINDOWS,
         )
 
-        self.assertRegex(tunnel_name, r"^pvawg-[0-9a-f]{8}-[0-9a-f]{6}$")
-        self.assertLessEqual(len(tunnel_name), 21)
+        self.assertRegex(tunnel_name, r"^pvawg-[0-9a-f]{8}$")
+        self.assertLessEqual(len(tunnel_name), 14)
         self.assertNotIn("8a8fe697-25e0", tunnel_name)
+
+    def test_amneziawg_tunnel_name_is_stable_for_entry(self) -> None:
+        first = build_tunnel_name(
+            "entry-with-uuid-like-8a8fe697-25e0-4b7b-8928",
+            "session-a",
+            engine_kind=RuntimeEngineKind.AMNEZIAWG_WINDOWS,
+        )
+        second = build_tunnel_name(
+            "entry-with-uuid-like-8a8fe697-25e0-4b7b-8928",
+            "session-b",
+            engine_kind=RuntimeEngineKind.AMNEZIAWG_WINDOWS,
+        )
+
+        self.assertEqual(first, second)
 
     def test_windows_adapter_stop_reuses_elevation_flow_for_cleanup(self) -> None:
         helper_path = self._create_helper("proxyvault-wireguard-windows.exe")
