@@ -48,7 +48,7 @@ class CreatePortableSeedTests(unittest.TestCase):
 
             target_db = create_portable_seed.create_seed(args)
 
-            self.assertEqual(target_db, output_dir / "proxyvault.db")
+            self.assertEqual(target_db, (output_dir / "proxyvault.db").resolve())
             self.assertFalse(qr_dir.exists())
 
             seed_db = DatabaseManager(target_db)
