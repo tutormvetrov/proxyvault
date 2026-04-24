@@ -14,12 +14,14 @@ from PyQt6.QtWidgets import QApplication, QLabel, QPushButton
 from app.db import DatabaseManager
 from app.i18n import SupportedLocale, set_locale, tr
 from app.models import ProxyType
+from app.runtime.enums import RouteOwnerKind, RuntimeEngineKind, SystemProxyState
+from app.runtime.manager import RuntimeManager
 from app.ui.card_view import CardView, EntryCardWidget
 from app.ui.detail_panel import DetailPanel
 from app.ui.dialogs import HelpDialog, WelcomeDialog
 from app.ui.main_window import MainWindow
 from app.ui.settings import SettingsDialog
-from tests.runtime.fakes import make_entry
+from tests.runtime.fakes import FakeAdapter, FakeRouteController, make_entry
 
 
 def collect_visible_texts(widget) -> list[str]:
@@ -205,6 +207,26 @@ class UiSmokeSurfaceTests(unittest.TestCase):
         self.assertEqual(window.connect_action.text(), "Connect Selected")
         self.assertIn("Search", window.search_edit.placeholderText())
         assert_no_missing_markers(self, collect_visible_texts(window) + collect_action_texts(window))
+
+    def test_connect_action_promotes_proxy_session_to_system_route(self) -> None:
+        entry = make_entry("proxy-1", ProxyType.VLESS_WS)
+        self.db.save_entry(entry)
+        route_controller = FakeRouteController(apply_state=SystemProxyState.APPLIED)
+        adapter = FakeAdapter(
+            engine_kind=RuntimeEngineKind.SING_BOX,
+            supported_types={ProxyType.VLESS_WS},
+            route_owner_kind=RouteOwnerKind.PROXY,
+        )
+        runtime_manager = RuntimeManager(self.db, adapters=[adapter], route_controller=route_controller)
+        window = MainWindow(self.db, runtime_manager=runtime_manager, auto_show_welcome=False)
+
+        window.start_runtime_for_entry(entry.id)
+
+        snapshot = runtime_manager.snapshot()
+        self.assertEqual(route_controller.apply_calls, [entry.id])
+        self.assertEqual(snapshot.system_proxy_state, SystemProxyState.APPLIED)
+        self.assertEqual(len(snapshot.sessions), 1)
+        self.assertTrue(snapshot.sessions[0].is_primary)
 
     def test_entry_card_localizes_support_labels_in_both_locales(self) -> None:
         entry = make_entry("mirror", ProxyType.VLESS_WS, name="mirror.example.com")

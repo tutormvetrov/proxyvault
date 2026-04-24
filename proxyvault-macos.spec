@@ -6,12 +6,16 @@ from pathlib import Path
 
 target_arch = os.environ.get('PYINSTALLER_TARGET_ARCH') or 'universal2'
 ROOT = Path.cwd()
+HELP_MARKDOWN_DATAS = [
+    (str(path), "app/help")
+    for path in sorted((ROOT / "app" / "help").glob("*.md"))
+]
 
 a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=HELP_MARKDOWN_DATAS,
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

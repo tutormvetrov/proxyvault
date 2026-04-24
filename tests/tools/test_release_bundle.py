@@ -139,6 +139,18 @@ class ReleaseBundleTests(unittest.TestCase):
 
         self.module.validate_release_archive(platform_name="windows", archive_path=archive_path)
 
+    def test_release_stage_requires_packaged_help_markdown(self) -> None:
+        stage_dir = self.temp_path / "ProxyVault-win-x64"
+        stage_dir.mkdir(parents=True)
+        self._populate_windows_stage(stage_dir)
+        self.module.load_runtime_manifest = self._runtime_manifest
+        (stage_dir / "_internal" / "app" / "help" / "content_ru.md").unlink()
+
+        with self.assertRaises(self.module.ReleaseBundleError) as error:
+            self.module.validate_release_stage(platform_name="windows", stage_dir=stage_dir)
+
+        self.assertIn("_internal/app/help/content_ru.md", str(error.exception))
+
     def test_validate_release_stage_rejects_corrupt_amneziawg_payload(self) -> None:
         stage_dir = self.temp_path / "ProxyVault-win-x64"
         stage_dir.mkdir(parents=True)

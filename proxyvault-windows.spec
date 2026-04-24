@@ -4,13 +4,17 @@ from pathlib import Path
 
 
 ROOT = Path.cwd()
+HELP_MARKDOWN_DATAS = [
+    (str(path), "app/help")
+    for path in sorted((ROOT / "app" / "help").glob("*.md"))
+]
 
 
 a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=HELP_MARKDOWN_DATAS,
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

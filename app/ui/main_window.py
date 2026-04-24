@@ -957,7 +957,7 @@ class MainWindow(QMainWindow):
             self.show_toast(tr("dialog.runtime.client_mode_disabled.body"))
             return
         self.runtime_failures_by_entry_id.pop(entry_id, None)
-        self.runtime_manager.start_entry(entry_id)
+        self.runtime_manager.start_entry(entry_id, make_primary=True)
 
     def stop_runtime_for_entry(self, entry_id: str) -> None:
         self.runtime_manager.stop_entry(entry_id)

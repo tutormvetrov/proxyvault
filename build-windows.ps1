@@ -199,6 +199,8 @@ $stagedAmneziaWGAwg = Join-Path $stageDir "engines\amneziawg\windows\AmneziaWG\a
 $stagedAmneziaWGWintun = Join-Path $stageDir "engines\amneziawg\windows\AmneziaWG\wintun.dll"
 $stagedThirdPartyNotices = Join-Path $stageDir "THIRD_PARTY_NOTICES.md"
 $stagedLicenseReadme = Join-Path $stageDir "LICENSES\README.md"
+$stagedHelpContentRu = Join-Path $stageDir "_internal\app\help\content_ru.md"
+$stagedHelpWelcomeRu = Join-Path $stageDir "_internal\app\help\welcome_ru.md"
 
 Assert-FileExists -LiteralPath $stagedSingBox -Description "Staged sing-box executable"
 Assert-FileExists -LiteralPath $stagedCronet -Description "Staged libcronet.dll"
@@ -211,6 +213,8 @@ Assert-FileExists -LiteralPath $stagedAmneziaWGAwg -Description "Staged awg.exe"
 Assert-FileExists -LiteralPath $stagedAmneziaWGWintun -Description "Staged AmneziaWG wintun.dll"
 Assert-FileExists -LiteralPath $stagedThirdPartyNotices -Description "Staged third-party notices bundle"
 Assert-FileExists -LiteralPath $stagedLicenseReadme -Description "Staged third-party license bundle"
+Assert-FileExists -LiteralPath $stagedHelpContentRu -Description "Staged Russian help content"
+Assert-FileExists -LiteralPath $stagedHelpWelcomeRu -Description "Staged Russian welcome content"
 Invoke-Checked { & $python ".\tools\release_bundle.py" validate-stage --platform windows --stage-dir $stageDir }
 
 if ($IncludeLocalData) {

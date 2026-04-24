@@ -199,6 +199,7 @@ class ReleaseLayoutTests(unittest.TestCase):
         self.assertIn("Assert-FileExists -LiteralPath $stagedWireGuardBootstrapMsi", script)
         self.assertIn("THIRD_PARTY_NOTICES.md", script)
         self.assertIn("LICENSES\\README.md", script)
+        self.assertIn("_internal\\app\\help\\content_ru.md", script)
         self.assertIn("$python = Join-Path $root \".venv\\Scripts\\python.exe\"", script)
         self.assertIn("Invoke-ProcessChecked -FilePath $python -ArgumentList @(", script)
         self.assertIn("Start-Process -FilePath $FilePath -ArgumentList $ArgumentList -Wait -PassThru -NoNewWindow", script)
@@ -244,6 +245,7 @@ class ReleaseLayoutTests(unittest.TestCase):
         self.assertIn("Contents/Resources/engines/sing-box/macos/sing-box", script)
         self.assertIn("THIRD_PARTY_NOTICES.md", script)
         self.assertIn("LICENSES/README.md", script)
+        self.assertIn("Contents/Resources/app/help/content_ru.md", script)
         self.assertIn("SHA256SUMS.txt", script)
 
     def test_pyinstaller_specs_keep_main_entrypoint_and_named_app_bundles(self) -> None:
@@ -252,10 +254,14 @@ class ReleaseLayoutTests(unittest.TestCase):
 
         self.assertIn("['main.py']", windows_spec)
         self.assertIn("name='ProxyVault'", windows_spec)
+        self.assertIn("HELP_MARKDOWN_DATAS", windows_spec)
+        self.assertIn("app/help", windows_spec)
         self.assertNotIn("Tree(str(ENGINE_TREE_ROOT), prefix=\"engines\")", windows_spec)
         self.assertNotIn("WINDOWS_RELEASE_REQUIRED_RELATIVE_PATHS", windows_spec)
         self.assertIn("['main.py']", macos_spec)
         self.assertIn("name='ProxyVault.app'", macos_spec)
+        self.assertIn("HELP_MARKDOWN_DATAS", macos_spec)
+        self.assertIn("app/help", macos_spec)
         self.assertNotIn("Tree(str(ENGINE_TREE_ROOT), prefix=\"engines\")", macos_spec)
         self.assertNotIn("MACOS_RELEASE_REQUIRED_RELATIVE_PATHS", macos_spec)
         self.assertIn("bundle_identifier='com.proxyvault.app'", macos_spec)

@@ -15,6 +15,13 @@ RUNTIME_MANIFEST_PATH = REPO_ROOT / "tools" / "runtime_assets" / "manifest.json"
 NOTICE_SOURCE = REPO_ROOT / "tools" / "runtime_assets" / "THIRD_PARTY_NOTICES.md"
 LICENSES_SOURCE_DIR = REPO_ROOT / "tools" / "runtime_assets" / "LICENSES"
 PORTABLE_SEED_SOURCE_DIR = REPO_ROOT / "portable-seed"
+HELP_MARKDOWN_NAMES = (
+    "README.md",
+    "content_en.md",
+    "content_ru.md",
+    "welcome_en.md",
+    "welcome_ru.md",
+)
 
 
 class ReleaseBundleError(RuntimeError):
@@ -73,6 +80,10 @@ def _portable_seed_relpaths(*, stage_prefix: PurePosixPath = PurePosixPath("")) 
     return tuple(relpaths)
 
 
+def _help_markdown_relpaths(*, stage_prefix: PurePosixPath) -> tuple[PurePosixPath, ...]:
+    return tuple(stage_prefix / "app" / "help" / name for name in HELP_MARKDOWN_NAMES)
+
+
 def windows_repo_payload_relpaths(manifest: dict[str, object] | None = None) -> tuple[PurePosixPath, ...]:
     manifest = manifest or load_runtime_manifest()
     amneziawg = _amneziawg_windows_runtime(manifest)
@@ -93,6 +104,7 @@ def windows_stage_required_relpaths(manifest: dict[str, object] | None = None) -
         PurePosixPath("README.md"),
         PurePosixPath("THIRD_PARTY_NOTICES.md"),
         PurePosixPath("proxyvault.portable"),
+        *_help_markdown_relpaths(stage_prefix=PurePosixPath("_internal")),
         *windows_repo_payload_relpaths(manifest),
         *_license_stage_relpaths(),
         *_portable_seed_relpaths(),
@@ -103,6 +115,7 @@ def macos_stage_required_relpaths() -> tuple[PurePosixPath, ...]:
     return (
         PurePosixPath("README.md"),
         PurePosixPath("THIRD_PARTY_NOTICES.md"),
+        *_help_markdown_relpaths(stage_prefix=PurePosixPath("ProxyVault.app/Contents/Resources")),
         PurePosixPath("ProxyVault.app/Contents/Resources/engines/sing-box/macos/sing-box"),
         PurePosixPath("ProxyVault.app/Contents/Resources/engines/wireguard/macos/proxyvault-wireguard-macos"),
         PurePosixPath("ProxyVault.app/Contents/Resources/engines/amneziawg/macos/proxyvault-amneziawg-macos"),

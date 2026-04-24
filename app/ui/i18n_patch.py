@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from importlib import resources
 from pathlib import Path
 from typing import Any
 
@@ -606,6 +607,12 @@ def help_markdown_path(kind: str, locale: SupportedLocale | str | None = None) -
 
 
 def load_help_markdown(kind: str, locale: SupportedLocale | str | None = None) -> str:
+    resolved = SupportedLocale.coerce(locale or current_locale())
+    file_name = f"{kind}_{resolved.value}.md"
+    try:
+        return resources.files("app.help").joinpath(file_name).read_text(encoding="utf-8")
+    except (FileNotFoundError, ModuleNotFoundError, OSError):
+        pass
     path = help_markdown_path(kind, locale)
     try:
         return path.read_text(encoding="utf-8")
