@@ -29,6 +29,7 @@ WIREGUARD_FAILURE_SYSTEM_CONFLICT = "runtime.error.wireguard.system_conflict"
 WIREGUARD_WARNING_SYSTEM_PROMPT = "runtime.warning.wireguard.system_prompt_expected"
 WIREGUARD_WARNING_WINDOWS_ELEVATION = "runtime.warning.wireguard.windows_elevation_possible"
 WIREGUARD_WARNING_MACOS_UNSIGNED = "runtime.warning.wireguard.macos_unsigned_build_check"
+WIREGUARD_WARNING_HANDSHAKE_UNAVAILABLE = "runtime.warning.wireguard.handshake_unavailable"
 
 WIREGUARD_META_PLATFORM = "wireguard_platform"
 WIREGUARD_META_TUNNEL_NAME = "wireguard_tunnel_name"
@@ -91,6 +92,7 @@ class SubprocessWireGuardCommandRunner:
         env: dict[str, str] | None = None,
         timeout: float | None = None,
     ) -> WireGuardCommandResult:
+        run_kwargs = _hidden_subprocess_kwargs()
         completed = subprocess.run(
             [str(part) for part in command],
             cwd=str(cwd),
@@ -99,6 +101,7 @@ class SubprocessWireGuardCommandRunner:
             text=True,
             check=False,
             timeout=timeout,
+            **run_kwargs,
         )
         return WireGuardCommandResult(
             exit_code=completed.returncode,
@@ -797,3 +800,9 @@ def _apply_private_permissions(path: Path) -> None:
         os.chmod(path, 0o600)
     except OSError:
         return
+
+
+def _hidden_subprocess_kwargs() -> dict[str, int]:
+    if os.name == "nt" and hasattr(subprocess, "CREATE_NO_WINDOW"):
+        return {"creationflags": subprocess.CREATE_NO_WINDOW}
+    return {}

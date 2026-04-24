@@ -6,7 +6,14 @@ from pathlib import Path
 from unittest.mock import patch
 
 import app.paths as app_paths
-from app.paths import PORTABLE_MARKER_NAME, default_db_path, detect_portable_app_dir, portable_root_candidates
+from app.paths import (
+    PORTABLE_MARKER_NAME,
+    default_db_path,
+    detect_portable_app_dir,
+    portable_root_candidates,
+    resolve_app_dir,
+    resolve_app_dir_with_seed,
+)
 
 
 class PortablePathTests(unittest.TestCase):
@@ -39,7 +46,7 @@ class PortablePathTests(unittest.TestCase):
 
             self.assertEqual(detected, expected_stage_root)
 
-    def test_macos_bundle_seed_bootstraps_home_storage_when_sidecar_data_is_missing(self) -> None:
+    def test_macos_bundle_seed_bootstraps_home_database_when_sidecar_data_is_missing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             stage_root = Path(tmp) / "ProxyVault-macos-universal2"
             resources_dir = stage_root / "ProxyVault.app" / "Contents" / "Resources"
@@ -57,11 +64,41 @@ class PortablePathTests(unittest.TestCase):
             seeded_home = Path(tmp) / "SeededHome"
             with patch.object(app_paths, "HOME_APP_DIR", seeded_home):
                 self.assertIsNone(detect_portable_app_dir(executable_path=exe_path, frozen=True))
-                resolved = app_paths.resolve_app_dir(executable_path=exe_path, frozen=True)
+                resolved = resolve_app_dir_with_seed(executable_path=exe_path, frozen=True)
 
             self.assertEqual(resolved, seeded_home)
             self.assertTrue((seeded_home / app_paths.DB_FILENAME).exists())
-            self.assertTrue((seeded_home / app_paths.QR_DIRNAME / "seed.txt").exists())
+            self.assertFalse((seeded_home / app_paths.QR_DIRNAME / "seed.txt").exists())
+
+    def test_windows_portable_seed_bootstraps_portable_storage_when_database_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            exe_path = root / "ProxyVault.exe"
+            seed_dir = root / app_paths.BUNDLED_PORTABLE_SEED_DIRNAME
+            seed_dir.mkdir(parents=True, exist_ok=True)
+            exe_path.write_text("", encoding="utf-8")
+            (root / PORTABLE_MARKER_NAME).write_text("", encoding="utf-8")
+            (seed_dir / app_paths.DB_FILENAME).write_text("seed-db", encoding="utf-8")
+
+            resolved = resolve_app_dir_with_seed(executable_path=exe_path, frozen=True)
+
+            self.assertEqual(resolved, root.resolve())
+            self.assertEqual((root / app_paths.DB_FILENAME).read_text(encoding="utf-8"), "seed-db")
+
+    def test_resolve_app_dir_does_not_seed_until_explicitly_requested(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            exe_path = root / "ProxyVault.exe"
+            seed_dir = root / app_paths.BUNDLED_PORTABLE_SEED_DIRNAME
+            seed_dir.mkdir(parents=True, exist_ok=True)
+            exe_path.write_text("", encoding="utf-8")
+            (root / PORTABLE_MARKER_NAME).write_text("", encoding="utf-8")
+            (seed_dir / app_paths.DB_FILENAME).write_text("seed-db", encoding="utf-8")
+
+            resolved = resolve_app_dir(executable_path=exe_path, frozen=True)
+
+            self.assertEqual(resolved, root.resolve())
+            self.assertFalse((root / app_paths.DB_FILENAME).exists())
 
 
 if __name__ == "__main__":

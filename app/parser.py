@@ -123,11 +123,12 @@ def parse_proxy_text(text: str) -> ParsedConfig:
     if "://" in stripped:
         parsed = urlparse(stripped)
         if parsed.scheme and parsed.hostname:
+            port = _parsed_port(parsed, "URI", required=False)
             return ParsedConfig(
                 type=ProxyType.OTHER,
                 transport=parsed.scheme,
                 server_host=parsed.hostname or "",
-                server_port=parsed.port,
+                server_port=port,
                 params={"scheme": parsed.scheme, "path": parsed.path or ""},
             )
     raise ParseError("Unsupported or invalid proxy configuration")
@@ -135,13 +136,14 @@ def parse_proxy_text(text: str) -> ParsedConfig:
 
 def parse_vless(uri: str) -> ParsedConfig:
     parsed = urlparse(uri)
-    if not parsed.username or not parsed.hostname or not parsed.port:
+    port = _parsed_port(parsed, "VLESS")
+    if not parsed.username or not parsed.hostname or port is None:
         raise ParseError("Invalid VLESS URI")
     query = {key: values[-1] for key, values in parse_qs(parsed.query).items()}
     params = {
         "uuid": unquote(parsed.username or ""),
         "host": parsed.hostname or "",
-        "port": str(parsed.port or ""),
+        "port": str(port or ""),
         "network": query.get("type", ""),
         "security": query.get("security", ""),
         "flow": query.get("flow", ""),
@@ -165,7 +167,7 @@ def parse_vless(uri: str) -> ParsedConfig:
         type=proxy_type,
         transport=transport,
         server_host=parsed.hostname or "",
-        server_port=parsed.port,
+        server_port=port,
         params=params,
         display_name=unquote(parsed.fragment or ""),
     )
@@ -176,13 +178,14 @@ def parse_hysteria2(uri: str) -> ParsedConfig:
     if uri.lower().startswith("hy2://"):
         normalized = "hysteria2://" + uri[6:]
     parsed = urlparse(normalized)
-    if not parsed.hostname or not parsed.port:
+    port = _parsed_port(parsed, "Hysteria2")
+    if not parsed.hostname or port is None:
         raise ParseError("Invalid Hysteria2 URI")
     query = {key: values[-1] for key, values in parse_qs(parsed.query).items()}
     params = {
         "password": unquote(parsed.username or parsed.password or ""),
         "host": parsed.hostname or "",
-        "port": str(parsed.port or ""),
+        "port": str(port or ""),
         "obfs": query.get("obfs", ""),
         "obfs-password": query.get("obfs-password", ""),
         "sni": query.get("sni", ""),
@@ -197,7 +200,7 @@ def parse_hysteria2(uri: str) -> ParsedConfig:
         type=ProxyType.HYSTERIA2,
         transport=transport,
         server_host=parsed.hostname or "",
-        server_port=parsed.port,
+        server_port=port,
         params=params,
         display_name=unquote(parsed.fragment or ""),
     )
@@ -205,13 +208,14 @@ def parse_hysteria2(uri: str) -> ParsedConfig:
 
 def parse_naive(uri: str) -> ParsedConfig:
     parsed = urlparse(uri)
-    if not parsed.hostname or not parsed.port or not parsed.username:
+    port = _parsed_port(parsed, "NaiveProxy")
+    if not parsed.hostname or port is None or not parsed.username:
         raise ParseError("Invalid NaiveProxy URI")
     params = {
         "username": unquote(parsed.username or ""),
         "password": unquote(parsed.password or ""),
         "host": parsed.hostname or "",
-        "port": str(parsed.port or ""),
+        "port": str(port or ""),
         "path": parsed.path or "",
     }
     params = {k: v for k, v in params.items() if v}
@@ -219,7 +223,7 @@ def parse_naive(uri: str) -> ParsedConfig:
         type=ProxyType.NAIVE_PROXY,
         transport="https",
         server_host=parsed.hostname or "",
-        server_port=parsed.port,
+        server_port=port,
         params=params,
     )
 
@@ -291,7 +295,7 @@ def _decode_ss_auth(payload: str) -> tuple[str, str]:
 def parse_shadowsocks(uri: str) -> ParsedConfig:
     parsed = urlparse(uri)
     host = parsed.hostname or ""
-    port = parsed.port
+    port = _parsed_port(parsed, "Shadowsocks", required=False)
     method = ""
     password = ""
     if parsed.username:
@@ -303,9 +307,11 @@ def parse_shadowsocks(uri: str) -> ParsedConfig:
             method, password = _decode_ss_auth(auth)
             if ":" in host_port:
                 host, port_text = host_port.rsplit(":", 1)
-                port = int(port_text)
+                port = _parse_port_text(port_text, "Shadowsocks")
         else:
             raise ParseError("Invalid Shadowsocks URI")
+    if not host or port is None:
+        raise ParseError("Invalid Shadowsocks URI")
     params = {
         "method": method,
         "password": password,
@@ -326,7 +332,8 @@ def parse_shadowsocks(uri: str) -> ParsedConfig:
 
 def parse_trojan(uri: str) -> ParsedConfig:
     parsed = urlparse(uri)
-    if not parsed.hostname or not parsed.port or not parsed.username:
+    port = _parsed_port(parsed, "Trojan")
+    if not parsed.hostname or port is None or not parsed.username:
         raise ParseError("Invalid Trojan URI")
     query = {key: values[-1] for key, values in parse_qs(parsed.query).items()}
     network = query.get("type", "tcp")
@@ -334,7 +341,7 @@ def parse_trojan(uri: str) -> ParsedConfig:
     params = {
         "password": unquote(parsed.username or ""),
         "host": parsed.hostname or "",
-        "port": str(parsed.port or ""),
+        "port": str(port or ""),
         "sni": query.get("sni", ""),
         "alpn": query.get("alpn", ""),
         "path": query.get("path", ""),
@@ -345,7 +352,7 @@ def parse_trojan(uri: str) -> ParsedConfig:
         type=ProxyType.TROJAN,
         transport=f"{network}+{security}",
         server_host=parsed.hostname or "",
-        server_port=parsed.port,
+        server_port=port,
         params=params,
         display_name=unquote(parsed.fragment or ""),
     )
@@ -355,7 +362,30 @@ def decode_base64_padded(value: str) -> str:
     padding = len(value) % 4
     if padding:
         value += "=" * (4 - padding)
-    return base64.urlsafe_b64decode(value.encode("utf-8")).decode("utf-8")
+    try:
+        return base64.urlsafe_b64decode(value.encode("utf-8")).decode("utf-8")
+    except (binascii.Error, UnicodeDecodeError, ValueError) as exc:
+        raise ParseError("Invalid base64 payload") from exc
+
+
+def _parsed_port(parsed, label: str, *, required: bool = True) -> int | None:
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise ParseError(f"Invalid {label} port") from exc
+    if required and port is None:
+        raise ParseError(f"Invalid {label} port")
+    return port
+
+
+def _parse_port_text(port_text: str, label: str) -> int:
+    try:
+        port = int(port_text)
+    except ValueError as exc:
+        raise ParseError(f"Invalid {label} port") from exc
+    if not 0 < port <= 65535:
+        raise ParseError(f"Invalid {label} port")
+    return port
 
 
 def parse_subscription_payload(text: str) -> tuple[SubscriptionFormat, list[SubscriptionImportItem]]:
@@ -380,7 +410,7 @@ def try_decode_base64_subscription(text: str) -> str | None:
         return None
     try:
         decoded = decode_base64_padded(compact)
-    except (UnicodeDecodeError, binascii.Error, ValueError):
+    except ParseError:
         return None
     if "://" not in decoded:
         return None
@@ -468,7 +498,10 @@ def clash_proxy_to_item(proxy: dict[str, Any], index: int) -> SubscriptionImport
     else:
         return None
 
-    parsed = parse_proxy_text(uri)
+    try:
+        parsed = parse_proxy_text(uri)
+    except ParseError:
+        return None
     return SubscriptionImportItem(name=proxy_name, uri=uri, parsed=parsed)
 
 

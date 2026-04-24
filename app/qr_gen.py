@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import os
 import re
 import zipfile
 from pathlib import Path
@@ -69,6 +70,8 @@ def save_qr_assets(entry: ProxyEntry, options: QROptions, output_folder: str, ta
     image.save(png_path, format="PNG")
     svg_path = png_path.with_suffix(".svg")
     svg_path.write_bytes(build_qr_svg(entry.uri, options))
+    _apply_private_file_permissions(png_path)
+    _apply_private_file_permissions(svg_path)
     return str(png_path), str(svg_path)
 
 
@@ -174,9 +177,18 @@ def export_clash_yaml(entries: Iterable[ProxyEntry], destination: str) -> str:
     proxies = [build_clash_proxy(entry.name, entry.uri) for entry in entries]
     payload = {
         "mixed-port": 7890,
-        "allow-lan": True,
+        "allow-lan": False,
         "mode": "rule",
         "proxies": proxies,
     }
     Path(destination).write_text(yaml.safe_dump(payload, sort_keys=False, allow_unicode=True), encoding="utf-8")
     return destination
+
+
+def _apply_private_file_permissions(path: Path) -> None:
+    if os.name != "posix":
+        return
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        return

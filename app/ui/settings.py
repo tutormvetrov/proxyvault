@@ -476,7 +476,12 @@ class SettingsDialog(QDialog):
         if not self.db.has_master_password():
             self.set_password()
             return
-        dialog = PasswordDialog(tr("dialog.password.title.change"), ask_current=True, confirm_new=True, parent=self)
+        dialog = PasswordDialog(
+            tr("dialog.password.title.change"),
+            ask_current=self.db.is_locked,
+            confirm_new=True,
+            parent=self,
+        )
         if dialog.exec():
             try:
                 self.db.change_master_password(dialog.current_password, dialog.password)
@@ -492,18 +497,27 @@ class SettingsDialog(QDialog):
     def remove_password(self) -> None:
         if not self.db.has_master_password():
             return
-        dialog = PasswordDialog(tr("dialog.password.title.remove"), ask_current=True, confirm_new=False, parent=self)
-        if dialog.exec():
-            try:
-                self.db.remove_master_password(dialog.current_password)
-                self._refresh_password_status()
-                QMessageBox.information(self, tr("section.master_password"), tr("settings.password.removed_plaintext"))
-            except AuthenticationError as exc:
-                QMessageBox.warning(
-                    self,
-                    tr("section.master_password"),
-                    format_ui_error("ui.error.auth_failed", detail=exc),
-                )
+        current_password = ""
+        if self.db.is_locked:
+            dialog = PasswordDialog(
+                tr("dialog.password.title.remove"),
+                ask_current=False,
+                confirm_new=False,
+                parent=self,
+            )
+            if not dialog.exec():
+                return
+            current_password = dialog.password
+        try:
+            self.db.remove_master_password(current_password)
+            self._refresh_password_status()
+            QMessageBox.information(self, tr("section.master_password"), tr("settings.password.removed_plaintext"))
+        except AuthenticationError as exc:
+            QMessageBox.warning(
+                self,
+                tr("section.master_password"),
+                format_ui_error("ui.error.auth_failed", detail=exc),
+            )
 
     def accept(self) -> None:
         output_folder = self.output_folder_edit.text().strip()

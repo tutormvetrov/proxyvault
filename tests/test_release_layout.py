@@ -183,7 +183,7 @@ class ReleaseLayoutTests(unittest.TestCase):
         self.assertIn("tools\\runtime_assets\\LICENSES\\README.md", script)
         self.assertIn("IncludeLocalData was requested, but no portable seed directory was provided or found.", script)
         self.assertIn(
-            "Staging a clean Windows release without local data. Use -IncludeLocalData to bundle portable seed data explicitly.",
+            "Staging Windows release. Private portable-seed payload is bundled when present.",
             script,
         )
         self.assertIn("if ($IncludeLocalData) {", script)
@@ -199,7 +199,8 @@ class ReleaseLayoutTests(unittest.TestCase):
         self.assertIn("Assert-FileExists -LiteralPath $stagedWireGuardBootstrapMsi", script)
         self.assertIn("THIRD_PARTY_NOTICES.md", script)
         self.assertIn("LICENSES\\README.md", script)
-        self.assertIn("Invoke-ProcessChecked -FilePath \"python\" -ArgumentList @(", script)
+        self.assertIn("$python = Join-Path $root \".venv\\Scripts\\python.exe\"", script)
+        self.assertIn("Invoke-ProcessChecked -FilePath $python -ArgumentList @(", script)
         self.assertIn("Start-Process -FilePath $FilePath -ArgumentList $ArgumentList -Wait -PassThru -NoNewWindow", script)
         self.assertIn("\"--distpath\",", script)
         self.assertIn("('\"{0}\"' -f $distDir),", script)
@@ -232,10 +233,10 @@ class ReleaseLayoutTests(unittest.TestCase):
         self.assertIn("tools/runtime_assets/LICENSES/README.md", script)
         self.assertIn("INCLUDE_LOCAL_DATA=1 was requested, but no portable seed directory was provided or found.", script)
         self.assertIn(
-            "Staging a clean macOS release without local data. Use INCLUDE_LOCAL_DATA=1 to bundle portable seed data explicitly.",
+            "Staging macOS release. Private portable-seed payload is bundled when present.",
             script,
         )
-        self.assertIn("Clean macOS release unexpectedly contains bundled portable seed data", script)
+        self.assertNotIn("Clean macOS release unexpectedly contains bundled portable seed data", script)
         self.assertIn("assert_file_exists \"$REPO_WIREGUARD_HELPER\"", script)
         self.assertIn("assert_file_exists \"$STAGED_WIREGUARD_HELPER\"", script)
         self.assertIn("assert_file_exists \"$REPO_AMNEZIAWG_HELPER\"", script)

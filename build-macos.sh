@@ -110,15 +110,7 @@ if [[ "$INCLUDE_LOCAL_DATA" == "1" ]]; then
     cp -R "$PORTABLE_SOURCE_DIR/qrcodes" "$APP_SEED_DIR/qrcodes"
   fi
 else
-  echo "Staging a clean macOS release without local data. Use INCLUDE_LOCAL_DATA=1 to bundle portable seed data explicitly."
-fi
-
-if [[ "$INCLUDE_LOCAL_DATA" != "1" ]]; then
-  CLEAN_SEED_DIR="$STAGE_DIR/ProxyVault.app/Contents/Resources/portable-seed"
-  if [[ -e "$CLEAN_SEED_DIR" ]]; then
-    echo "Clean macOS release unexpectedly contains bundled portable seed data: $CLEAN_SEED_DIR" >&2
-    exit 1
-  fi
+  echo "Staging macOS release. Private portable-seed payload is bundled when present."
 fi
 
 ditto -c -k --keepParent "$STAGE_DIR" "$ARCHIVE_PATH"

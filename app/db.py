@@ -454,7 +454,8 @@ class DatabaseManager:
         self._rewrite_entry_uris(previous_entries)
 
     def change_master_password(self, current_password: str, new_password: str) -> None:
-        self.unlock(current_password)
+        if self.is_locked or current_password:
+            self.unlock(current_password)
         entries = self.list_entries(include_uri=True)
         salt = os.urandom(16)
         key = self._derive_key(new_password, salt)

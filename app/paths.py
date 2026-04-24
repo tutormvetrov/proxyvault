@@ -13,6 +13,10 @@ BUNDLED_PORTABLE_SEED_DIRNAME = "portable-seed"
 HOME_APP_DIR = Path.home() / APP_NAME
 
 
+def repo_root_dir() -> Path:
+    return Path(__file__).resolve().parents[1]
+
+
 def portable_root_candidates(*, executable_path: Path | str | None = None, frozen: bool | None = None) -> list[Path]:
     frozen_state = getattr(sys, "frozen", False) if frozen is None else frozen
     if not frozen_state:
@@ -45,8 +49,15 @@ def detect_portable_app_dir(*, executable_path: Path | str | None = None, frozen
 def bundled_portable_seed_dir(*, executable_path: Path | str | None = None, frozen: bool | None = None) -> Path | None:
     frozen_state = getattr(sys, "frozen", False) if frozen is None else frozen
     if not frozen_state:
-        return None
+        seed_dir = repo_root_dir() / BUNDLED_PORTABLE_SEED_DIRNAME
+        return seed_dir if seed_dir.exists() else None
     exe_path = Path(executable_path or sys.executable).resolve()
+    for candidate in (
+        exe_path.parent / BUNDLED_PORTABLE_SEED_DIRNAME,
+        exe_path.parent / "_internal" / BUNDLED_PORTABLE_SEED_DIRNAME,
+    ):
+        if candidate.exists():
+            return candidate
     for parent in exe_path.parents:
         if parent.name != "MacOS":
             continue
@@ -57,32 +68,48 @@ def bundled_portable_seed_dir(*, executable_path: Path | str | None = None, froz
     return None
 
 
-def seed_home_app_dir_from_bundle(*, executable_path: Path | str | None = None, frozen: bool | None = None) -> Path | None:
+def seed_app_dir_from_bundle(
+    app_dir: Path,
+    *,
+    executable_path: Path | str | None = None,
+    frozen: bool | None = None,
+) -> Path | None:
     seed_dir = bundled_portable_seed_dir(executable_path=executable_path, frozen=frozen)
     if seed_dir is None or not seed_dir.exists():
         return None
 
     db_source = seed_dir / DB_FILENAME
-    qr_source = seed_dir / QR_DIRNAME
-    if not db_source.exists() and not qr_source.exists():
+    if not db_source.exists():
         return None
 
     try:
-        HOME_APP_DIR.mkdir(parents=True, exist_ok=True)
-        db_target = HOME_APP_DIR / DB_FILENAME
-        qr_target = HOME_APP_DIR / QR_DIRNAME
+        app_dir.mkdir(parents=True, exist_ok=True)
+        db_target = app_dir / DB_FILENAME
         if db_source.exists() and not db_target.exists():
             shutil.copy2(db_source, db_target)
-        if qr_source.exists() and not qr_target.exists():
-            shutil.copytree(qr_source, qr_target)
     except OSError:
-        return HOME_APP_DIR
-    return HOME_APP_DIR
+        return app_dir
+    return app_dir
+
+
+def seed_home_app_dir_from_bundle(*, executable_path: Path | str | None = None, frozen: bool | None = None) -> Path | None:
+    frozen_state = getattr(sys, "frozen", False) if frozen is None else frozen
+    if not frozen_state:
+        return None
+    return seed_app_dir_from_bundle(HOME_APP_DIR, executable_path=executable_path, frozen=frozen)
 
 
 def resolve_app_dir(*, executable_path: Path | str | None = None, frozen: bool | None = None) -> Path:
     portable_dir = detect_portable_app_dir(executable_path=executable_path, frozen=frozen)
     if portable_dir is not None:
+        return portable_dir
+    return HOME_APP_DIR
+
+
+def resolve_app_dir_with_seed(*, executable_path: Path | str | None = None, frozen: bool | None = None) -> Path:
+    portable_dir = detect_portable_app_dir(executable_path=executable_path, frozen=frozen)
+    if portable_dir is not None:
+        seed_app_dir_from_bundle(portable_dir, executable_path=executable_path, frozen=frozen)
         return portable_dir
     seeded_home_dir = seed_home_app_dir_from_bundle(executable_path=executable_path, frozen=frozen)
     if seeded_home_dir is not None:

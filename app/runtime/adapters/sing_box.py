@@ -76,6 +76,7 @@ class SubprocessProcessRunner:
         cwd: Path,
         env: Mapping[str, str] | None = None,
     ) -> ManagedProcess:
+        popen_kwargs = _hidden_subprocess_kwargs()
         return subprocess.Popen(
             list(command),
             cwd=str(cwd),
@@ -83,6 +84,7 @@ class SubprocessProcessRunner:
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            **popen_kwargs,
         )
 
 
@@ -153,6 +155,8 @@ class SingBoxAdapter:
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_path.touch(exist_ok=True)
         config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
+        _apply_private_file_permissions(config_path)
+        _apply_private_file_permissions(log_path)
 
         launch_spec = LaunchSpec(
             session_id=session_id,
@@ -199,6 +203,9 @@ class SingBoxAdapter:
                 cwd=Path(launch_spec.working_dir),
                 env=env,
             )
+        except Exception:
+            self._cleanup_generated_config(launch_spec.session_id)
+            raise
         finally:
             reservation = self._reserved_ports_by_session_id.pop(launch_spec.session_id, None)
             if reservation is not None:
@@ -226,6 +233,9 @@ class SingBoxAdapter:
         updated = apply_health_to_session(session, log_text=log_excerpt, exit_code=exit_code)
         if exit_code is None and updated.runtime_state != RuntimeState.RUNNING:
             updated.runtime_state = RuntimeState.STARTING
+        if exit_code is not None:
+            self._process_by_session_id.pop(launch_spec.session_id, None)
+            self._cleanup_generated_config(launch_spec.session_id)
         return updated
 
     def stop(self, session: RunningSession, *, reason: SessionStopReason) -> RunningSession:
@@ -246,6 +256,7 @@ class SingBoxAdapter:
             exit_code = 0
 
         log_excerpt = read_log_excerpt(launch_spec.log_path, max_lines=20) if launch_spec else updated.log_excerpt
+        self._cleanup_generated_config(session.session_id)
         updated = apply_health_to_session(updated, log_text=log_excerpt, exit_code=exit_code)
         updated.runtime_state = RuntimeState.DISCONNECTED
         updated.failure_reason = ""
@@ -273,6 +284,7 @@ class SingBoxAdapter:
             updated.runtime_state = RuntimeState.STARTING if not log_excerpt else RuntimeState.RUNNING
         if exit_code is not None:
             self._process_by_session_id.pop(session.session_id, None)
+            self._cleanup_generated_config(session.session_id)
         return updated
 
     def read_log_excerpt(self, session: RunningSession, max_lines: int) -> str:
@@ -294,6 +306,15 @@ class SingBoxAdapter:
             path_entries.append(current_path)
         env["PATH"] = os.pathsep.join(path_entries)
         return env
+
+    def _cleanup_generated_config(self, session_id: str) -> None:
+        launch_spec = self._launch_spec_by_session_id.get(session_id)
+        if launch_spec is None or not launch_spec.config_path:
+            return
+        try:
+            Path(launch_spec.config_path).unlink(missing_ok=True)
+        except OSError:
+            return
 
 
 def build_sing_box_config(
@@ -677,3 +698,18 @@ def _coerce_positive_int(value: str | None, label: str) -> int:
     if parsed <= 0:
         raise SingBoxConfigError(f"{label} must be positive.")
     return parsed
+
+
+def _hidden_subprocess_kwargs() -> dict[str, int]:
+    if os.name == "nt" and hasattr(subprocess, "CREATE_NO_WINDOW"):
+        return {"creationflags": subprocess.CREATE_NO_WINDOW}
+    return {}
+
+
+def _apply_private_file_permissions(path: Path) -> None:
+    if os.name != "posix":
+        return
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        return

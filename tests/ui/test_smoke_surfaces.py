@@ -94,6 +94,28 @@ class UiSmokeSurfaceTests(unittest.TestCase):
         self.assertEqual(window.card_view.list_widget.count(), 0)
         self.assertIn(window.stop_all_action, window.toolbar.actions())
 
+    def test_detail_panel_splitter_can_collapse_to_edge(self) -> None:
+        window = MainWindow(self.db)
+        window.resize(990, 860)
+        window.show()
+        self.app.processEvents()
+
+        splitter = window.workspace_splitter
+        self.assertEqual(splitter.count(), 3)
+        self.assertFalse(splitter.isCollapsible(0))
+        self.assertFalse(splitter.isCollapsible(1))
+        self.assertTrue(splitter.isCollapsible(2))
+
+        sizes = splitter.sizes()
+        splitter.setSizes([sizes[0], sizes[1] + sizes[2], 0])
+        self.app.processEvents()
+
+        self.assertEqual(splitter.sizes()[2], 0)
+
+        splitter.moveSplitter(splitter.width(), 2)
+        self.app.processEvents()
+        self.assertEqual(splitter.sizes()[2], 0)
+
     def test_detail_panel_clear_state_is_disabled_and_safe(self) -> None:
         panel = DetailPanel()
 
@@ -149,6 +171,26 @@ class UiSmokeSurfaceTests(unittest.TestCase):
         self.assertIsInstance(widget, EntryCardWidget)
         texts = collect_visible_texts(widget)
         self.assertFalse(any(text in {"Connect", "Disconnect", "Make Primary"} for text in texts), texts)
+
+    def test_grid_view_scroll_reaches_last_visible_card(self) -> None:
+        card_view = CardView()
+        entries = [
+            make_entry(f"entry-{index}", ProxyType.VLESS_WS, name=f"Config {index}")
+            for index in range(7)
+        ]
+
+        card_view.resize(1000, 780)
+        card_view.set_entries(entries)
+        card_view.show()
+        self.app.processEvents()
+
+        scroll_bar = card_view.list_widget.verticalScrollBar()
+        self.assertGreater(scroll_bar.maximum(), 0)
+        scroll_bar.setValue(scroll_bar.maximum())
+        self.app.processEvents()
+
+        last_rect = card_view.list_widget.visualItemRect(card_view.list_widget.item(6))
+        self.assertLessEqual(last_rect.bottom(), card_view.list_widget.viewport().height())
 
     def test_main_window_switches_locale_without_missing_key_markers(self) -> None:
         window = MainWindow(self.db)

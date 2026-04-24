@@ -154,6 +154,7 @@ class SingBoxAdapterTests(unittest.TestCase):
         self.assertEqual(polled.runtime_state, RuntimeState.RUNNING)
         self.assertEqual(stopped.runtime_state, RuntimeState.DISCONNECTED)
         self.assertEqual(process.terminate_calls, 1)
+        self.assertFalse(Path(launch_spec.config_path).exists())
 
     def test_start_marks_immediate_process_exit_as_error(self) -> None:
         process = FakeProcess(exit_code=1)
@@ -173,6 +174,7 @@ class SingBoxAdapterTests(unittest.TestCase):
 
         self.assertEqual(session.runtime_state, RuntimeState.ERROR)
         self.assertEqual(session.failure_reason, "runtime.error.server_unreachable")
+        self.assertFalse(Path(launch_spec.config_path).exists())
 
     def test_naive_proxy_requires_cronet_runtime_asset(self) -> None:
         process_runner = FakeProcessRunner(FakeProcess())

@@ -167,6 +167,15 @@ class CommandResult:
     stderr: str
 
 
+HANDSHAKE_UNAVAILABLE_WARNING = "runtime.warning.wireguard.handshake_unavailable"
+
+
+@dataclass(slots=True)
+class HandshakeStatus:
+    last_handshake_at: str = ""
+    warning_codes: tuple[str, ...] = ()
+
+
 def _decode_output(raw: bytes | None) -> str:
     if not raw:
         return ""
@@ -185,11 +194,13 @@ def _decode_output(raw: bytes | None) -> str:
 
 
 def run_command(command: Sequence[str]) -> CommandResult:
+    run_kwargs = _hidden_subprocess_kwargs()
     completed = subprocess.run(
         [str(part) for part in command],
         capture_output=True,
         text=False,
         check=False,
+        **run_kwargs,
     )
     return CommandResult(
         exit_code=completed.returncode,
@@ -200,6 +211,12 @@ def run_command(command: Sequence[str]) -> CommandResult:
 
 def _powershell_quote(value: str) -> str:
     return "'" + str(value).replace("'", "''") + "'"
+
+
+def _hidden_subprocess_kwargs() -> dict[str, int]:
+    if os.name == "nt" and hasattr(subprocess, "CREATE_NO_WINDOW"):
+        return {"creationflags": subprocess.CREATE_NO_WINDOW}
+    return {}
 
 
 def _read_optional_text(path: Path) -> str:
@@ -259,7 +276,7 @@ def run_elevated_command(command: Sequence[str]) -> CommandResult:
                     str(script_path),
                 )
             )
-            + ") -Verb RunAs -PassThru -Wait -ErrorAction Stop",
+            + ") -Verb RunAs -WindowStyle Hidden -PassThru -Wait -ErrorAction Stop",
             "  exit [int]$proc.ExitCode",
             "} catch {",
             "  $message = $_.Exception.Message",
@@ -273,6 +290,7 @@ def run_elevated_command(command: Sequence[str]) -> CommandResult:
         ]
     )
     try:
+        run_kwargs = _hidden_subprocess_kwargs()
         completed = subprocess.run(
             [
                 "powershell.exe",
@@ -286,6 +304,7 @@ def run_elevated_command(command: Sequence[str]) -> CommandResult:
             capture_output=True,
             text=False,
             check=False,
+            **run_kwargs,
         )
         stdout = _read_optional_text(stdout_path)
         stderr = "\n".join(
@@ -732,13 +751,16 @@ def collect_install_failure_diagnostics(
     )
 
 
-def latest_handshake_iso(handle: str) -> str:
+def latest_handshake_status(handle: str) -> HandshakeStatus:
     awg_exe = locate_awg_exe()
     if awg_exe is None:
-        return ""
+        return HandshakeStatus(warning_codes=(HANDSHAKE_UNAVAILABLE_WARNING,))
     result = run_command([str(awg_exe), "show", handle, "latest-handshakes"])
     if result.exit_code != 0:
-        return ""
+        output = "\n".join(part.strip() for part in (result.stdout, result.stderr) if part.strip()).lower()
+        if any(token in output for token in ("permission denied", "access is denied", "administrator")):
+            return HandshakeStatus(warning_codes=(HANDSHAKE_UNAVAILABLE_WARNING,))
+        return HandshakeStatus()
     max_epoch = 0
     for line in result.stdout.splitlines():
         parts = line.strip().split()
@@ -751,8 +773,24 @@ def latest_handshake_iso(handle: str) -> str:
         if epoch > max_epoch:
             max_epoch = epoch
     if max_epoch <= 0:
-        return ""
-    return datetime.fromtimestamp(max_epoch, tz=timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "")
+        return HandshakeStatus()
+    return HandshakeStatus(
+        last_handshake_at=datetime.fromtimestamp(max_epoch, tz=timezone.utc)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "")
+    )
+
+
+def latest_handshake_iso(handle: str) -> str:
+    return latest_handshake_status(handle).last_handshake_at
+
+
+def apply_handshake_status(payload: dict[str, object], handshake: HandshakeStatus) -> dict[str, object]:
+    payload["last_handshake_at"] = handshake.last_handshake_at
+    if handshake.warning_codes:
+        payload["warning_codes"] = list(handshake.warning_codes)
+    return payload
 
 
 def parse_args() -> argparse.Namespace:
@@ -801,15 +839,18 @@ def cmd_up(args: argparse.Namespace) -> int:
     existing_state = query_service(service_name)
     if existing_state is not None and existing_state.state in {"RUNNING", "START_PENDING"}:
         write_log(log_path, f"Reusing already running tunnel service {service_name}.")
+        handshake = latest_handshake_status(args.tunnel_name)
         return emit(
-            {
-                "runtime_state": "RUNNING" if existing_state.state == "RUNNING" else "STARTING",
-                "handle": args.tunnel_name,
-                "pid": existing_state.pid,
-                "last_activity_at": utc_now_iso(),
-                "last_handshake_at": latest_handshake_iso(args.tunnel_name),
-                "log_excerpt": f"Reusing already running tunnel service {service_name}.",
-            }
+            apply_handshake_status(
+                {
+                    "runtime_state": "RUNNING" if existing_state.state == "RUNNING" else "STARTING",
+                    "handle": args.tunnel_name,
+                    "pid": existing_state.pid,
+                    "last_activity_at": utc_now_iso(),
+                    "log_excerpt": f"Reusing already running tunnel service {service_name}.",
+                },
+                handshake,
+            )
         )
 
     reusable_service = find_reusable_running_tunnel(args.tunnel_name, config_path)
@@ -817,15 +858,18 @@ def cmd_up(args: argparse.Namespace) -> int:
         handle = _service_handle_from_name(reusable_service.service_name)
         message = f"Reusing already running tunnel service {reusable_service.service_name}."
         write_log(log_path, message)
+        handshake = latest_handshake_status(handle)
         return emit(
-            {
-                "runtime_state": "RUNNING" if reusable_service.state == "RUNNING" else "STARTING",
-                "handle": handle,
-                "pid": reusable_service.pid,
-                "last_activity_at": utc_now_iso(),
-                "last_handshake_at": latest_handshake_iso(handle),
-                "log_excerpt": message,
-            }
+            apply_handshake_status(
+                {
+                    "runtime_state": "RUNNING" if reusable_service.state == "RUNNING" else "STARTING",
+                    "handle": handle,
+                    "pid": reusable_service.pid,
+                    "last_activity_at": utc_now_iso(),
+                    "log_excerpt": message,
+                },
+                handshake,
+            )
         )
 
     note_install_attempt(log_path, args.tunnel_name, config_path)
@@ -873,14 +917,17 @@ def cmd_up(args: argparse.Namespace) -> int:
             log_excerpt=diagnostics.log_excerpt,
         )
 
-    payload: dict[str, object] = {
-        "runtime_state": "RUNNING" if service_state.state == "RUNNING" else "STARTING",
-        "handle": args.tunnel_name,
-        "pid": service_state.pid,
-        "last_activity_at": utc_now_iso(),
-        "last_handshake_at": latest_handshake_iso(args.tunnel_name),
-        "log_excerpt": output,
-    }
+    handshake = latest_handshake_status(args.tunnel_name)
+    payload: dict[str, object] = apply_handshake_status(
+        {
+            "runtime_state": "RUNNING" if service_state.state == "RUNNING" else "STARTING",
+            "handle": args.tunnel_name,
+            "pid": service_state.pid,
+            "last_activity_at": utc_now_iso(),
+            "log_excerpt": output,
+        },
+        handshake,
+    )
     write_log(log_path, output)
     return emit(payload)
 
@@ -964,12 +1011,15 @@ def cmd_status(args: argparse.Namespace) -> int:
             }
         )
 
-    payload: dict[str, object] = {
-        "handle": args.handle,
-        "pid": service_state.pid,
-        "last_activity_at": utc_now_iso(),
-        "last_handshake_at": latest_handshake_iso(args.handle),
-    }
+    handshake = latest_handshake_status(args.handle)
+    payload: dict[str, object] = apply_handshake_status(
+        {
+            "handle": args.handle,
+            "pid": service_state.pid,
+            "last_activity_at": utc_now_iso(),
+        },
+        handshake,
+    )
     if service_state.state == "RUNNING":
         payload["runtime_state"] = "RUNNING"
         return emit(payload)

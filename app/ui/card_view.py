@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QListWidget,
     QListWidgetItem,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -20,6 +21,10 @@ from app.models import ProxyEntry, TYPE_COLORS, TYPE_SOFT_COLORS, TYPE_TEXT_COLO
 from app.runtime.models import RunningSession, RuntimeHumanStatus
 from app.ui.i18n_patch import RuntimePresentation, ensure_ui_translations, present_runtime_state, tooltip_text
 from app.ui.theme import refresh_widget_style
+
+
+GRID_ITEM_SIZE = QSize(348, 232)
+LIST_ITEM_SIZE = QSize(520, 168)
 
 
 def _placeholder_pixmap(text: str, size: int = 96) -> QPixmap:
@@ -116,7 +121,7 @@ class EntryCardWidget(QFrame):
         thumb.setFixedSize(78, 78)
         pixmap = (
             QPixmap(self.entry.qr_png_path)
-            if self.entry.qr_png_path and Path(self.entry.qr_png_path).exists()
+            if not self.entry.is_locked and self.entry.qr_png_path and Path(self.entry.qr_png_path).exists()
             else _placeholder_pixmap(getattr(self.entry.type, "value", ""))
         )
         thumb.setPixmap(
@@ -291,6 +296,9 @@ class CardView(QWidget):
         self.list_widget = QListWidget()
         self.list_widget.setObjectName("cardList")
         self.list_widget.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
+        self.list_widget.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.list_widget.setVerticalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
+        self.list_widget.setUniformItemSizes(True)
         self.list_widget.itemSelectionChanged.connect(self._emit_selection)
         self.list_widget.itemDoubleClicked.connect(self._emit_activation)
         self._configure_list()
@@ -302,16 +310,22 @@ class CardView(QWidget):
     def _configure_list(self) -> None:
         if self.mode == "grid":
             self.list_widget.setViewMode(QListWidget.ViewMode.IconMode)
+            self.list_widget.setFlow(QListWidget.Flow.LeftToRight)
             self.list_widget.setResizeMode(QListWidget.ResizeMode.Adjust)
             self.list_widget.setSpacing(14)
             self.list_widget.setWrapping(True)
             self.list_widget.setMovement(QListWidget.Movement.Static)
+            self.list_widget.setGridSize(GRID_ITEM_SIZE)
         else:
             self.list_widget.setViewMode(QListWidget.ViewMode.ListMode)
             self.list_widget.setResizeMode(QListWidget.ResizeMode.Adjust)
             self.list_widget.setSpacing(10)
             self.list_widget.setWrapping(False)
             self.list_widget.setMovement(QListWidget.Movement.Static)
+            self.list_widget.setGridSize(QSize())
+
+    def _item_size(self) -> QSize:
+        return GRID_ITEM_SIZE if self.mode == "grid" else LIST_ITEM_SIZE
 
     def set_mode(self, mode: str) -> None:
         self.mode = mode
@@ -345,18 +359,20 @@ class CardView(QWidget):
         for entry in entries:
             item = QListWidgetItem()
             item.setData(Qt.ItemDataRole.UserRole, entry.id)
-            item.setSizeHint(QSize(286, 196) if self.mode == "grid" else QSize(448, 146))
+            item.setSizeHint(self._item_size())
             self.list_widget.addItem(item)
+            card = EntryCardWidget(
+                entry,
+                self.mode,
+                runtime_session=self._runtime_by_entry_id.get(entry.id),
+                human_status=self._human_status_by_entry_id.get(entry.id),
+                failure_reason=self._failure_by_entry_id.get(entry.id, ""),
+                client_mode_enabled=self._client_mode_enabled,
+            )
+            card.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
             self.list_widget.setItemWidget(
                 item,
-                EntryCardWidget(
-                    entry,
-                    self.mode,
-                    runtime_session=self._runtime_by_entry_id.get(entry.id),
-                    human_status=self._human_status_by_entry_id.get(entry.id),
-                    failure_reason=self._failure_by_entry_id.get(entry.id, ""),
-                    client_mode_enabled=self._client_mode_enabled,
-                ),
+                card,
             )
             if entry.id in selected_ids:
                 item.setSelected(True)

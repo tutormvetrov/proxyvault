@@ -4,7 +4,7 @@ import base64
 import unittest
 
 from app.models import ProxyType, SubscriptionFormat
-from app.parser import parse_proxy_text, parse_subscription_payload
+from app.parser import ParseError, parse_proxy_text, parse_subscription_payload
 
 
 class ParserTests(unittest.TestCase):
@@ -134,6 +134,28 @@ proxies:
         self.assertEqual(items[0].name, "Clash Trojan")
         self.assertEqual(items[0].parsed.type, ProxyType.TROJAN)
         self.assertEqual(items[0].parsed.server_host, "trojan.example.com")
+
+    def test_malformed_uri_raises_parse_error_not_foreign_exception(self) -> None:
+        with self.assertRaises(ParseError):
+            parse_proxy_text("ss://broken-base64@127.0.0.1:8388#bad")
+
+        with self.assertRaises(ParseError):
+            parse_proxy_text("trojan://secret@example.com:not-a-port#bad")
+
+    def test_subscription_skips_malformed_lines(self) -> None:
+        payload = "\n".join(
+            [
+                "ss://broken-base64@127.0.0.1:8388#bad",
+                "trojan://secret@trojan.example.com:443?sni=cdn.example.com#Trojan Node",
+                "vless://uuid@example.com:not-a-port#bad",
+            ]
+        )
+
+        fmt, items = parse_subscription_payload(payload)
+
+        self.assertEqual(fmt, SubscriptionFormat.PLAIN_URI_LIST)
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].name, "Trojan Node")
 
 
 if __name__ == "__main__":

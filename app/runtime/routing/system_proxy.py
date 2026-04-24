@@ -32,11 +32,13 @@ class CommandRunner(Protocol):
 
 class SubprocessCommandRunner:
     def run(self, command: Sequence[str]) -> CommandResult:
+        run_kwargs = _hidden_subprocess_kwargs()
         completed = subprocess.run(
             list(command),
             check=False,
             capture_output=True,
             text=True,
+            **run_kwargs,
         )
         return CommandResult(
             returncode=completed.returncode,
@@ -113,3 +115,9 @@ def create_system_proxy_controller(
 
         return SystemProxyController(MacOSSystemProxyBackend(runner))
     return NoopSystemProxyController()
+
+
+def _hidden_subprocess_kwargs() -> dict[str, int]:
+    if sys.platform.lower().startswith("win") and hasattr(subprocess, "CREATE_NO_WINDOW"):
+        return {"creationflags": subprocess.CREATE_NO_WINDOW}
+    return {}

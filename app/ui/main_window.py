@@ -124,6 +124,7 @@ class MainWindow(QMainWindow):
         self.sidebar = Sidebar()
         self.card_view = CardView()
         self.detail_panel = DetailPanel()
+        self._detail_panel_last_width = 520
 
         self._build_layout()
         self._build_actions()
@@ -168,14 +169,19 @@ class MainWindow(QMainWindow):
 
     def _build_layout(self) -> None:
         splitter = QSplitter()
+        self.workspace_splitter = splitter
         splitter.setObjectName("workspaceSplitter")
-        splitter.setChildrenCollapsible(False)
+        splitter.setChildrenCollapsible(True)
         splitter.addWidget(self.sidebar)
         splitter.addWidget(self.card_view)
         splitter.addWidget(self.detail_panel)
+        splitter.setCollapsible(0, False)
+        splitter.setCollapsible(1, False)
+        splitter.setCollapsible(2, True)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         splitter.setStretchFactor(2, 1)
+        splitter.setHandleWidth(12)
         splitter.setSizes([220, 760, 520])
 
         canvas = QWidget()
@@ -1114,7 +1120,9 @@ class MainWindow(QMainWindow):
         self.show_toast(tr("toast.delete_undone"))
 
     def save_current_qr(self, entry_id: str) -> None:
-        entry = self.db.get_entry(entry_id, include_uri=not self.db.is_locked)
+        if not self.ensure_unlocked(tr("main.search.reason.regenerate_qr")):
+            return
+        entry = self.db.get_entry(entry_id, include_uri=True)
         if not entry:
             return
         default_name = f"{entry.name}.png"
@@ -1127,15 +1135,9 @@ class MainWindow(QMainWindow):
         if not destination:
             return
         try:
-            if entry.uri and not entry.is_locked:
-                save_qr_assets(entry, self.settings.default_qr, self.settings.output_folder, target_path=destination)
-            elif entry.qr_png_path and Path(entry.qr_png_path).exists():
-                shutil.copy2(entry.qr_png_path, destination)
-                svg_src = Path(entry.qr_png_path).with_suffix(".svg")
-                if svg_src.exists():
-                    shutil.copy2(svg_src, Path(destination).with_suffix(".svg"))
-            else:
+            if entry.is_locked or not entry.uri:
                 raise FileNotFoundError(tr("dialog.runtime_log.empty"))
+            save_qr_assets(entry, self.settings.default_qr, self.settings.output_folder, target_path=destination)
             self.show_toast(tr("toast.qr_saved", path=destination))
         except OSError as exc:
             QMessageBox.warning(self, tr("action.save_qr_png"), format_ui_error("ui.error.save_qr_failed", detail=exc))
@@ -1144,7 +1146,9 @@ class MainWindow(QMainWindow):
         if not self.current_entry:
             QMessageBox.information(self, tr("toolbar.export.button"), tr("dialog.export.select_entry"))
             return
-        entry = self.db.get_entry(self.current_entry.id, include_uri=not self.db.is_locked)
+        if not self.ensure_unlocked(tr("main.search.reason.regenerate_qr")):
+            return
+        entry = self.db.get_entry(self.current_entry.id, include_uri=True)
         if not entry:
             return
         filters = {
@@ -1162,26 +1166,19 @@ class MainWindow(QMainWindow):
             return
         try:
             if fmt == "png":
-                if entry.uri and not entry.is_locked:
-                    save_qr_assets(entry, self.settings.default_qr, self.settings.output_folder, target_path=destination)
-                elif entry.qr_png_path and Path(entry.qr_png_path).exists():
-                    shutil.copy2(entry.qr_png_path, destination)
-                else:
+                if entry.is_locked or not entry.uri:
                     raise FileNotFoundError(tr("dialog.export.no_unlocked"))
+                save_qr_assets(entry, self.settings.default_qr, self.settings.output_folder, target_path=destination)
             if fmt == "svg":
-                svg_src = Path(entry.qr_png_path).with_suffix(".svg")
-                if entry.uri and not entry.is_locked:
-                    _png, svg_path = save_qr_assets(
-                        entry,
-                        self.settings.default_qr,
-                        self.settings.output_folder,
-                        target_path=str(Path(destination).with_suffix(".png")),
-                    )
-                    shutil.copy2(svg_path, destination)
-                elif svg_src.exists():
-                    shutil.copy2(svg_src, destination)
-                else:
+                if entry.is_locked or not entry.uri:
                     raise FileNotFoundError(tr("dialog.export.no_unlocked"))
+                _png, svg_path = save_qr_assets(
+                    entry,
+                    self.settings.default_qr,
+                    self.settings.output_folder,
+                    target_path=str(Path(destination).with_suffix(".png")),
+                )
+                shutil.copy2(svg_path, destination)
             elif fmt == "pdf":
                 if entry.is_locked or not entry.uri:
                     raise AuthenticationError(tr("detail.copy_uri.locked"))
@@ -1191,7 +1188,9 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, tr("toolbar.export.button"), format_ui_error("ui.error.export_failed", detail=exc))
 
     def export_selection_zip(self) -> None:
-        entries = self.selected_or_visible_entries()
+        if not self.ensure_unlocked(tr("main.search.reason.regenerate_qr")):
+            return
+        entries = [entry for entry in self.selected_or_visible_entries(include_uri=True) if entry.uri and not entry.is_locked]
         if not entries:
             QMessageBox.information(self, tr("toolbar.export.button"), tr("dialog.export.no_selection"))
             return
@@ -1199,6 +1198,10 @@ class MainWindow(QMainWindow):
         if not destination:
             return
         try:
+            for entry in entries:
+                png_path, _ = save_qr_assets(entry, self.settings.default_qr, self.settings.output_folder)
+                entry.qr_png_path = png_path
+                self.db.save_entry(entry)
             export_zip(entries, destination)
             self.show_toast(tr("toast.zip_export_created"))
         except OSError as exc:
@@ -1302,7 +1305,19 @@ class MainWindow(QMainWindow):
         self._populate_view_combo(mode)
 
     def toggle_details_panel(self) -> None:
-        self.detail_panel.setVisible(not self.detail_panel.isVisible())
+        sizes = self.workspace_splitter.sizes()
+        if self.detail_panel.isVisible() and sizes[2] > 0:
+            self._detail_panel_last_width = sizes[2]
+            self.workspace_splitter.setSizes([sizes[0], sizes[1] + sizes[2], 0])
+            self.detail_panel.setVisible(False)
+            return
+
+        self.detail_panel.setVisible(True)
+        detail_width = max(self._detail_panel_last_width, 360)
+        available = max(sum(sizes), self.workspace_splitter.width())
+        sidebar_width = sizes[0] if sizes and sizes[0] > 0 else 220
+        list_width = max(360, available - sidebar_width - detail_width)
+        self.workspace_splitter.setSizes([sidebar_width, list_width, detail_width])
 
     def toggle_theme(self) -> None:
         next_theme = "dark" if self.settings.theme in {"system", "light"} else "light"
@@ -1368,19 +1383,14 @@ class MainWindow(QMainWindow):
         QMessageBox.information(self, tr("app.about.title"), tr("app.about.body"))
 
     def show_fullscreen_qr(self, entry_id: str) -> None:
-        entry = self.db.get_entry(entry_id, include_uri=not self.db.is_locked)
+        if not self.ensure_unlocked(tr("main.search.reason.regenerate_qr")):
+            return
+        entry = self.db.get_entry(entry_id, include_uri=True)
         if not entry:
             return
         pixmap = QPixmap()
         if entry.uri and not entry.is_locked:
             pixmap = qr_pixmap(entry.uri, self.settings.default_qr, max_size=1200)
-        elif entry.qr_png_path and Path(entry.qr_png_path).exists():
-            pixmap = QPixmap(entry.qr_png_path).scaled(
-                1200,
-                1200,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            )
         else:
             QMessageBox.information(
                 self,

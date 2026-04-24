@@ -84,7 +84,7 @@ class WireGuardHelperWindowsTests(unittest.TestCase):
             state="RUNNING",
             pid=4321,
         )
-        self.module.latest_handshake_iso = lambda handle: ""
+        self.module.latest_handshake_status = lambda handle: self.module.HandshakeStatus()
 
         args = argparse.Namespace(
             config=str(self.config_path),
@@ -153,6 +153,19 @@ class WireGuardHelperWindowsTests(unittest.TestCase):
         self.assertIsNone(executable)
         self.assertEqual(reason_code, "system_prompt_denied")
         self.assertIn("cancelled", message.lower())
+
+    def test_latest_handshake_status_marks_permission_denied_as_unavailable(self) -> None:
+        self.module.locate_wg_exe = lambda: Path("C:/Program Files/WireGuard/wg.exe")
+        self.module.run_command = lambda command: self.module.CommandResult(
+            exit_code=1,
+            stdout="",
+            stderr="Unable to access interface proxyvault-entry: Permission denied",
+        )
+
+        status = self.module.latest_handshake_status("proxyvault-entry")
+
+        self.assertEqual(status.last_handshake_at, "")
+        self.assertIn(self.module.HANDSHAKE_UNAVAILABLE_WARNING, status.warning_codes)
 
 
 if __name__ == "__main__":

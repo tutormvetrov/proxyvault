@@ -231,6 +231,7 @@ CATALOG_RU: dict[str, str] = {
     "reachability.reason.runtime_failure_default": "Runtime/handshake-проверка не подтвердила рабочее соединение.",
     "reachability.reason.success": "Проверка прошла успешно.",
     "reachability.reason.runtime_success": "Конфигурация прошла runtime-проверку.",
+    "reachability.reason.runtime_observation_limited": "Runtime запущен, но доступ к handshake ограничен.",
     "reachability.reason.no_detail": "Без деталей",
     "reachability.details.none": "Диагностика пока недоступна.",
     "reachability.details.not_applicable": (
@@ -246,6 +247,11 @@ CATALOG_RU: dict[str, str] = {
     "reachability.details.runtime_success_existing": (
         "Для профиля «{name}» уже есть активная сессия. Runtime показывает рукопожатие с {endpoint}, "
         "поэтому текущая конфигурация считается рабочей."
+    ),
+    "reachability.details.runtime_observation_limited": (
+        "Профиль «{name}» запустил туннель для {endpoint}, но Windows не дала ProxyVault прочитать последнее "
+        "рукопожатие без повышенных прав. Туннель не считается упавшим. Запустите трафик через туннель "
+        "или откройте ProxyVault от имени администратора, если нужно прямое подтверждение handshake."
     ),
     "reachability.details.runtime_failure": (
         "{title}\n\n{summary}\n\nЧто сделать дальше: {action}\n\nТехнические детали:\n{technical_detail}"

@@ -77,7 +77,7 @@ class AmneziaWGHelperWindowsTests(unittest.TestCase):
         self.module.run_command = lambda command: self.module.CommandResult(exit_code=0, stdout="", stderr="")
         self.module.run_elevated_command = lambda command: self.module.CommandResult(exit_code=0, stdout="", stderr="")
         self.module.wait_for_service = lambda service_name, desired_state, timeout=10.0: None
-        self.module.latest_handshake_iso = lambda handle: ""
+        self.module.latest_handshake_status = lambda handle: self.module.HandshakeStatus()
         self.module.collect_install_failure_diagnostics = lambda **kwargs: self.module.InstallFailureDiagnostics(
             reason_code="tunnel_exited_early",
             message="AmneziaWG tunnel service disappeared right after install.",
@@ -108,7 +108,9 @@ class AmneziaWGHelperWindowsTests(unittest.TestCase):
             service_name="AmneziaWGTunnel$pvawg-deadbeef-654321",
             config_path=str(self.config_path),
         )
-        self.module.latest_handshake_iso = lambda handle: "2026-04-23T11:00:00"
+        self.module.latest_handshake_status = lambda handle: self.module.HandshakeStatus(
+            last_handshake_at="2026-04-23T11:00:00"
+        )
         self.module.run_command = lambda command: self.fail("cmd_up should not install a duplicate service")
 
         args = argparse.Namespace(
@@ -144,7 +146,7 @@ class AmneziaWGHelperWindowsTests(unittest.TestCase):
             service_name=service_name,
             config_path=str(self.config_path),
         )
-        self.module.latest_handshake_iso = lambda handle: ""
+        self.module.latest_handshake_status = lambda handle: self.module.HandshakeStatus()
 
         args = argparse.Namespace(
             config=str(self.config_path),
@@ -158,6 +160,19 @@ class AmneziaWGHelperWindowsTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertEqual(calls, [("pvawg-deadbeef", self.config_path, Path("C:/Program Files/AmneziaWG/amneziawg.exe"))])
         self.assertEqual(self.captured["payload"]["runtime_state"], "RUNNING")
+
+    def test_latest_handshake_status_marks_permission_denied_as_unavailable(self) -> None:
+        self.module.locate_awg_exe = lambda: Path("C:/Program Files/AmneziaWG/awg.exe")
+        self.module.run_command = lambda command: self.module.CommandResult(
+            exit_code=1,
+            stdout="",
+            stderr="Unable to access interface pvawg-deadbeef: Permission denied",
+        )
+
+        status = self.module.latest_handshake_status("pvawg-deadbeef")
+
+        self.assertEqual(status.last_handshake_at, "")
+        self.assertIn(self.module.HANDSHAKE_UNAVAILABLE_WARNING, status.warning_codes)
 
     def test_cmd_up_returns_bundle_incomplete_when_bundled_runtime_is_missing(self) -> None:
         helper_dir = self.temp_path / "helper"

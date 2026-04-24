@@ -174,6 +174,19 @@ class ReleaseBundleTests(unittest.TestCase):
 
         self.assertIn("wrong-platform payloads", str(error.exception))
 
+    def test_portable_seed_payload_only_includes_database(self) -> None:
+        seed_dir = self.temp_path / "portable-seed"
+        (seed_dir / "qrcodes").mkdir(parents=True)
+        (seed_dir / ".gitignore").write_text("*", encoding="utf-8")
+        (seed_dir / "README.md").write_text("docs", encoding="utf-8")
+        (seed_dir / "proxyvault.db").write_text("private-db", encoding="utf-8")
+        (seed_dir / "qrcodes" / "node.svg").write_text("private-qr", encoding="utf-8")
+        self.module.PORTABLE_SEED_SOURCE_DIR = seed_dir
+
+        relpaths = {path.as_posix() for path in self.module._portable_seed_relpaths()}
+
+        self.assertEqual(relpaths, {"portable-seed/proxyvault.db"})
+
 
 if __name__ == "__main__":
     unittest.main()

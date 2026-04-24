@@ -14,6 +14,7 @@ REPO_ROOT = SCRIPT_DIR.parent
 RUNTIME_MANIFEST_PATH = REPO_ROOT / "tools" / "runtime_assets" / "manifest.json"
 NOTICE_SOURCE = REPO_ROOT / "tools" / "runtime_assets" / "THIRD_PARTY_NOTICES.md"
 LICENSES_SOURCE_DIR = REPO_ROOT / "tools" / "runtime_assets" / "LICENSES"
+PORTABLE_SEED_SOURCE_DIR = REPO_ROOT / "portable-seed"
 
 
 class ReleaseBundleError(RuntimeError):
@@ -62,6 +63,16 @@ def _license_stage_relpaths() -> tuple[PurePosixPath, ...]:
     return tuple(relpaths)
 
 
+def _portable_seed_relpaths(*, stage_prefix: PurePosixPath = PurePosixPath("")) -> tuple[PurePosixPath, ...]:
+    if not PORTABLE_SEED_SOURCE_DIR.exists():
+        return ()
+    relpaths: list[PurePosixPath] = []
+    for path in sorted(PORTABLE_SEED_SOURCE_DIR.rglob("*")):
+        if path.is_file() and _is_portable_seed_payload_file(path):
+            relpaths.append(stage_prefix / PORTABLE_SEED_SOURCE_DIR.name / path.relative_to(PORTABLE_SEED_SOURCE_DIR).as_posix())
+    return tuple(relpaths)
+
+
 def windows_repo_payload_relpaths(manifest: dict[str, object] | None = None) -> tuple[PurePosixPath, ...]:
     manifest = manifest or load_runtime_manifest()
     amneziawg = _amneziawg_windows_runtime(manifest)
@@ -84,6 +95,7 @@ def windows_stage_required_relpaths(manifest: dict[str, object] | None = None) -
         PurePosixPath("proxyvault.portable"),
         *windows_repo_payload_relpaths(manifest),
         *_license_stage_relpaths(),
+        *_portable_seed_relpaths(),
     )
 
 
@@ -95,6 +107,7 @@ def macos_stage_required_relpaths() -> tuple[PurePosixPath, ...]:
         PurePosixPath("ProxyVault.app/Contents/Resources/engines/wireguard/macos/proxyvault-wireguard-macos"),
         PurePosixPath("ProxyVault.app/Contents/Resources/engines/amneziawg/macos/proxyvault-amneziawg-macos"),
         *_license_stage_relpaths(),
+        *_portable_seed_relpaths(stage_prefix=PurePosixPath("ProxyVault.app/Contents/Resources")),
     )
 
 
@@ -120,6 +133,19 @@ def _copy_file(source: Path, destination: Path) -> None:
     shutil.copy2(source, destination)
 
 
+def _copy_tree_contents(source_dir: Path, destination_dir: Path) -> None:
+    if not source_dir.exists():
+        return
+    for path in source_dir.rglob("*"):
+        if not path.is_file() or not _is_portable_seed_payload_file(path):
+            continue
+        _copy_file(path, destination_dir / path.relative_to(source_dir))
+
+
+def _is_portable_seed_payload_file(path: Path) -> bool:
+    return path.name.lower() == "proxyvault.db"
+
+
 def copy_release_payload(*, platform_name: str, stage_dir: Path, repo_root: Path | None = None) -> None:
     repo_root = repo_root or REPO_ROOT
     manifest = load_runtime_manifest()
@@ -134,10 +160,15 @@ def copy_release_payload(*, platform_name: str, stage_dir: Path, repo_root: Path
     if platform_name == "windows":
         for relpath in windows_repo_payload_relpaths(manifest):
             _copy_file(repo_root / relpath, stage_dir / relpath)
+        _copy_tree_contents(repo_root / "portable-seed", stage_dir / "portable-seed")
         return
     if platform_name == "macos":
         for source_relpath, stage_relpath in _macos_engine_source_to_stage_relpaths():
             _copy_file(repo_root / source_relpath, stage_dir / stage_relpath)
+        _copy_tree_contents(
+            repo_root / "portable-seed",
+            stage_dir / "ProxyVault.app" / "Contents" / "Resources" / "portable-seed",
+        )
         return
     raise ReleaseBundleError(f"Unsupported platform for release payload copy: {platform_name}")
 

@@ -170,6 +170,15 @@ class CommandResult:
     stderr: str
 
 
+HANDSHAKE_UNAVAILABLE_WARNING = "runtime.warning.wireguard.handshake_unavailable"
+
+
+@dataclass(slots=True)
+class HandshakeStatus:
+    last_handshake_at: str = ""
+    warning_codes: tuple[str, ...] = ()
+
+
 @dataclass(slots=True)
 class BootstrapInstallResult:
     exit_code: int
@@ -195,11 +204,13 @@ def _decode_output(raw: bytes | None) -> str:
 
 
 def run_command(command: Sequence[str]) -> CommandResult:
+    run_kwargs = _hidden_subprocess_kwargs()
     completed = subprocess.run(
         [str(part) for part in command],
         capture_output=True,
         text=False,
         check=False,
+        **run_kwargs,
     )
     return CommandResult(
         exit_code=completed.returncode,
@@ -210,6 +221,12 @@ def run_command(command: Sequence[str]) -> CommandResult:
 
 def _powershell_quote(value: str) -> str:
     return "'" + str(value).replace("'", "''") + "'"
+
+
+def _hidden_subprocess_kwargs() -> dict[str, int]:
+    if os.name == "nt" and hasattr(subprocess, "CREATE_NO_WINDOW"):
+        return {"creationflags": subprocess.CREATE_NO_WINDOW}
+    return {}
 
 
 def _read_optional_text(path: Path) -> str:
@@ -269,7 +286,7 @@ def run_elevated_command(command: Sequence[str]) -> CommandResult:
                     str(script_path),
                 )
             )
-            + ") -Verb RunAs -PassThru -Wait -ErrorAction Stop",
+            + ") -Verb RunAs -WindowStyle Hidden -PassThru -Wait -ErrorAction Stop",
             "  exit [int]$proc.ExitCode",
             "} catch {",
             "  $message = $_.Exception.Message",
@@ -283,6 +300,7 @@ def run_elevated_command(command: Sequence[str]) -> CommandResult:
         ]
     )
     try:
+        run_kwargs = _hidden_subprocess_kwargs()
         completed = subprocess.run(
             [
                 "powershell.exe",
@@ -296,6 +314,7 @@ def run_elevated_command(command: Sequence[str]) -> CommandResult:
             capture_output=True,
             text=False,
             check=False,
+            **run_kwargs,
         )
         stdout = _read_optional_text(stdout_path)
         stderr = "\n".join(
@@ -421,13 +440,16 @@ def wait_for_service(service_name: str, *, desired_state: str, timeout: float = 
     return query_service(service_name)
 
 
-def latest_handshake_iso(handle: str) -> str:
+def latest_handshake_status(handle: str) -> HandshakeStatus:
     wg_exe = locate_wg_exe()
     if wg_exe is None:
-        return ""
+        return HandshakeStatus(warning_codes=(HANDSHAKE_UNAVAILABLE_WARNING,))
     result = run_command([str(wg_exe), "show", handle, "latest-handshakes"])
     if result.exit_code != 0:
-        return ""
+        output = "\n".join(part.strip() for part in (result.stdout, result.stderr) if part.strip()).lower()
+        if any(token in output for token in ("permission denied", "access is denied", "administrator")):
+            return HandshakeStatus(warning_codes=(HANDSHAKE_UNAVAILABLE_WARNING,))
+        return HandshakeStatus()
     max_epoch = 0
     for line in result.stdout.splitlines():
         parts = line.strip().split()
@@ -440,8 +462,24 @@ def latest_handshake_iso(handle: str) -> str:
         if epoch > max_epoch:
             max_epoch = epoch
     if max_epoch <= 0:
-        return ""
-    return datetime.fromtimestamp(max_epoch, tz=timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "")
+        return HandshakeStatus()
+    return HandshakeStatus(
+        last_handshake_at=datetime.fromtimestamp(max_epoch, tz=timezone.utc)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "")
+    )
+
+
+def latest_handshake_iso(handle: str) -> str:
+    return latest_handshake_status(handle).last_handshake_at
+
+
+def apply_handshake_status(payload: dict[str, object], handshake: HandshakeStatus) -> dict[str, object]:
+    payload["last_handshake_at"] = handshake.last_handshake_at
+    if handshake.warning_codes:
+        payload["warning_codes"] = list(handshake.warning_codes)
+    return payload
 
 
 def _sha256_file(path: Path) -> str:
@@ -644,14 +682,17 @@ def cmd_up(args: argparse.Namespace) -> int:
     elif service_state.state not in {"RUNNING", "START_PENDING"}:
         runtime_state = "ERROR"
 
-    payload: dict[str, object] = {
-        "runtime_state": runtime_state,
-        "handle": args.tunnel_name,
-        "pid": service_state.pid if service_state is not None else None,
-        "last_activity_at": utc_now_iso(),
-        "last_handshake_at": latest_handshake_iso(args.tunnel_name),
-        "log_excerpt": output,
-    }
+    handshake = latest_handshake_status(args.tunnel_name)
+    payload: dict[str, object] = apply_handshake_status(
+        {
+            "runtime_state": runtime_state,
+            "handle": args.tunnel_name,
+            "pid": service_state.pid if service_state is not None else None,
+            "last_activity_at": utc_now_iso(),
+            "log_excerpt": output,
+        },
+        handshake,
+    )
     if runtime_state == "ERROR":
         query_text = query_service_text(service_name)
         message = (
@@ -728,12 +769,15 @@ def cmd_status(args: argparse.Namespace) -> int:
             }
         )
 
-    payload: dict[str, object] = {
-        "handle": args.handle,
-        "pid": service_state.pid,
-        "last_activity_at": utc_now_iso(),
-        "last_handshake_at": latest_handshake_iso(args.handle),
-    }
+    handshake = latest_handshake_status(args.handle)
+    payload: dict[str, object] = apply_handshake_status(
+        {
+            "handle": args.handle,
+            "pid": service_state.pid,
+            "last_activity_at": utc_now_iso(),
+        },
+        handshake,
+    )
     if service_state.state == "RUNNING":
         payload["runtime_state"] = "RUNNING"
         return emit(payload)

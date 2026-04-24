@@ -13,10 +13,15 @@ from app.models import ProxyEntry, ProxyType, ReachabilityCheck, ReachabilitySta
 from app.runtime.contracts import EngineAdapter
 from app.runtime.enums import RuntimeEngineKind, RuntimeState, SessionStopReason
 from app.runtime.models import LaunchSpec, RunningSession, RuntimePrefs
-from app.runtime.wireguard_support import WIREGUARD_FAILURE_HANDSHAKE_MISSING, WIREGUARD_META_LOG_PATH
+from app.runtime.wireguard_support import (
+    WIREGUARD_FAILURE_HANDSHAKE_MISSING,
+    WIREGUARD_META_LOG_PATH,
+    WIREGUARD_META_WARNING_CODES,
+    WIREGUARD_WARNING_HANDSHAKE_UNAVAILABLE,
+)
 
 _WIREGUARD_HANDSHAKE_TIMEOUT_SECONDS = 6.0
-_AMNEZIAWG_HANDSHAKE_TIMEOUT_SECONDS = 10.0
+_AMNEZIAWG_HANDSHAKE_TIMEOUT_SECONDS = 20.0
 _RUNTIME_HANDSHAKE_POLL_INTERVAL_SECONDS = 0.5
 _RUNTIME_HANDSHAKE_TRAFFIC_INTERVAL_SECONDS = 1.5
 _RUNTIME_TRIGGER_ENDPOINTS: tuple[tuple[str, int], ...] = (
@@ -188,11 +193,10 @@ def run_wireguard_runtime_probe(
             )
 
         traffic_started_at = 0.0
-        should_stimulate = entry.type != ProxyType.AMNEZIAWG
         deadline = time.monotonic() + _runtime_handshake_timeout(entry)
         while time.monotonic() < deadline:
             now_monotonic = time.monotonic()
-            if should_stimulate and now_monotonic - traffic_started_at >= _RUNTIME_HANDSHAKE_TRAFFIC_INTERVAL_SECONDS:
+            if now_monotonic - traffic_started_at >= _RUNTIME_HANDSHAKE_TRAFFIC_INTERVAL_SECONDS:
                 _stimulate_runtime_handshake()
                 traffic_started_at = now_monotonic
             time.sleep(_RUNTIME_HANDSHAKE_POLL_INTERVAL_SECONDS)
@@ -236,6 +240,14 @@ def run_wireguard_runtime_probe(
                 endpoint=endpoint,
                 method=method,
                 session=session,
+            )
+        if _handshake_observation_unavailable(session):
+            return _build_runtime_observation_limited(
+                entry,
+                checked_at=checked_at,
+                endpoint=endpoint,
+                method=method,
+                log_path=_runtime_log_path(session, launch_spec=launch_spec),
             )
         technical_detail = session.last_error or session.log_excerpt or tr("reachability.reason.failure_default")
         return _build_runtime_failure(
@@ -513,7 +525,7 @@ def _prepare_amneziawg_diagnostic_config(parser: configparser.ConfigParser) -> N
     interface = parser["Interface"]
     peer = parser["Peer"]
     _remove_interface_dns(interface)
-    interface["Table"] = "off"
+    peer["AllowedIPs"] = _diagnostic_allowed_ips()
     peer["PersistentKeepalive"] = "5"
 
 
@@ -569,6 +581,17 @@ def _runtime_log_path(session: RunningSession | None, *, launch_spec: LaunchSpec
     return ""
 
 
+def _handshake_observation_unavailable(session: RunningSession) -> bool:
+    warning_codes = session.metadata.get(WIREGUARD_META_WARNING_CODES)
+    if isinstance(warning_codes, str):
+        values = [warning_codes]
+    elif isinstance(warning_codes, Sequence):
+        values = list(warning_codes)
+    else:
+        values = []
+    return WIREGUARD_WARNING_HANDSHAKE_UNAVAILABLE in {str(value).strip() for value in values}
+
+
 def _build_runtime_success(
     entry: ProxyEntry,
     *,
@@ -593,6 +616,31 @@ def _build_runtime_success(
             name=entry.name,
             endpoint=endpoint,
             latency_suffix=_latency_suffix(duration_ms),
+        ),
+        log_path=log_path,
+        config_fingerprint=entry.uri_fingerprint,
+    )
+
+
+def _build_runtime_observation_limited(
+    entry: ProxyEntry,
+    *,
+    checked_at: str,
+    endpoint: str,
+    method: str,
+    log_path: str = "",
+) -> ReachabilityCheck:
+    return ReachabilityCheck(
+        checked_at=checked_at,
+        status=ReachabilityState.NOT_APPLICABLE,
+        endpoint=endpoint,
+        method=method,
+        failure_reason=tr("reachability.reason.runtime_observation_limited"),
+        error_category="handshake_observation_limited",
+        details=tr(
+            "reachability.details.runtime_observation_limited",
+            name=entry.name,
+            endpoint=endpoint,
         ),
         log_path=log_path,
         config_fingerprint=entry.uri_fingerprint,

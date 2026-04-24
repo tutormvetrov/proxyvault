@@ -15,6 +15,11 @@ from app.models import ProxyEntry, ProxyType, ReachabilityCheck, ReachabilitySta
 from app.runtime.enums import RouteOwnerKind, RuntimeEngineKind, RuntimeState, SessionStopReason
 from app.runtime.manager import RuntimeManager
 from app.runtime.models import LaunchSpec, RunningSession, RuntimePrefs, SessionHistoryRecord
+import app.runtime.reachability as reachability
+from app.runtime.wireguard_support import (
+    WIREGUARD_META_WARNING_CODES,
+    WIREGUARD_WARNING_HANDSHAKE_UNAVAILABLE,
+)
 from app.ui.main_window import MainWindow
 
 
@@ -114,6 +119,41 @@ class FakeHysteriaAdapter:
         return ""
 
 
+class FakeDelayedAmneziaAdapter(FakeAmneziaAdapter):
+    def __init__(self) -> None:
+        super().__init__()
+        self.poll_count = 0
+
+    def start(self, launch_spec: LaunchSpec) -> RunningSession:
+        return RunningSession(
+            session_id="session-awg-delayed",
+            entry_id=launch_spec.entry_id,
+            entry_name=launch_spec.display_name,
+            engine_kind=self.engine_kind,
+            runtime_state=RuntimeState.RUNNING,
+            route_owner_kind=RouteOwnerKind.WIREGUARD,
+        )
+
+    def poll(self, session: RunningSession) -> RunningSession:
+        updated = RunningSession.from_dict(session.to_dict())
+        self.poll_count += 1
+        if self.poll_count >= 2:
+            updated.last_handshake_at = "2026-04-22T12:00:03"
+        return updated
+
+
+class FakeHandshakeUnavailableAmneziaAdapter(FakeDelayedAmneziaAdapter):
+    def start(self, launch_spec: LaunchSpec) -> RunningSession:
+        session = super().start(launch_spec)
+        session.metadata[WIREGUARD_META_WARNING_CODES] = [WIREGUARD_WARNING_HANDSHAKE_UNAVAILABLE]
+        return session
+
+    def poll(self, session: RunningSession) -> RunningSession:
+        updated = RunningSession.from_dict(session.to_dict())
+        updated.metadata[WIREGUARD_META_WARNING_CODES] = [WIREGUARD_WARNING_HANDSHAKE_UNAVAILABLE]
+        return updated
+
+
 class UdpReachabilityTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -192,11 +232,96 @@ class UdpReachabilityTests(unittest.TestCase):
         self.assertIn("runtime", result.method.lower())
         self.assertIn("handshake", result.method.lower())
         self.assertIn("runtime", result.failure_reason.lower())
-        self.assertIn("AllowedIPs = 0.0.0.0/0,::/0", adapter.prepared_uri)
+        self.assertIn("AllowedIPs = 1.1.1.1/32,8.8.8.8/32", adapter.prepared_uri)
+        self.assertNotIn("AllowedIPs = 0.0.0.0/0,::/0", adapter.prepared_uri)
         self.assertNotIn("DNS=", adapter.prepared_uri)
         self.assertIn("Jc = 5", adapter.prepared_uri)
-        self.assertIn("Table = off", adapter.prepared_uri)
+        self.assertNotIn("Table = off", adapter.prepared_uri)
         self.assertIn("PersistentKeepalive = 5", adapter.prepared_uri)
+
+    def test_amneziawg_probe_stimulates_traffic_until_handshake_updates(self) -> None:
+        adapter = FakeDelayedAmneziaAdapter()
+        runtime_manager = RuntimeManager(self.db, adapters=[adapter])
+        window = self._create_window(runtime_manager=runtime_manager)
+        entry = ProxyEntry(
+            id="awg-delayed",
+            name="Delayed AWG",
+            uri=(
+                "[Interface]\n"
+                "PrivateKey=test\n"
+                "Address=10.66.66.2/32\n"
+                "\n"
+                "[Peer]\n"
+                "PublicKey=peer\n"
+                "AllowedIPs=0.0.0.0/0\n"
+                "Endpoint=45.140.205.4:51820\n"
+            ),
+            type=ProxyType.AMNEZIAWG,
+            transport="udp",
+            server_host="45.140.205.4",
+            server_port=51820,
+        )
+        calls: list[str] = []
+        original_stimulate = reachability._stimulate_runtime_handshake
+        original_timeout = reachability._AMNEZIAWG_HANDSHAKE_TIMEOUT_SECONDS
+        original_poll = reachability._RUNTIME_HANDSHAKE_POLL_INTERVAL_SECONDS
+        original_traffic = reachability._RUNTIME_HANDSHAKE_TRAFFIC_INTERVAL_SECONDS
+        reachability._stimulate_runtime_handshake = lambda: calls.append("traffic")
+        reachability._AMNEZIAWG_HANDSHAKE_TIMEOUT_SECONDS = 0.5
+        reachability._RUNTIME_HANDSHAKE_POLL_INTERVAL_SECONDS = 0.01
+        reachability._RUNTIME_HANDSHAKE_TRAFFIC_INTERVAL_SECONDS = 0.01
+        try:
+            result = window._run_tcp_probe(entry)
+        finally:
+            reachability._stimulate_runtime_handshake = original_stimulate
+            reachability._AMNEZIAWG_HANDSHAKE_TIMEOUT_SECONDS = original_timeout
+            reachability._RUNTIME_HANDSHAKE_POLL_INTERVAL_SECONDS = original_poll
+            reachability._RUNTIME_HANDSHAKE_TRAFFIC_INTERVAL_SECONDS = original_traffic
+
+        self.assertEqual(result.status, ReachabilityState.REACHABLE)
+        self.assertGreaterEqual(len(calls), 1)
+
+    def test_amneziawg_probe_reports_limited_observation_when_windows_blocks_handshake_read(self) -> None:
+        adapter = FakeHandshakeUnavailableAmneziaAdapter()
+        runtime_manager = RuntimeManager(self.db, adapters=[adapter])
+        window = self._create_window(runtime_manager=runtime_manager)
+        entry = ProxyEntry(
+            id="awg-unavailable",
+            name="AWG Unavailable",
+            uri=(
+                "[Interface]\n"
+                "PrivateKey=test\n"
+                "Address=10.66.66.2/32\n"
+                "\n"
+                "[Peer]\n"
+                "PublicKey=peer\n"
+                "AllowedIPs=0.0.0.0/0\n"
+                "Endpoint=45.140.205.4:51820\n"
+            ),
+            type=ProxyType.AMNEZIAWG,
+            transport="udp",
+            server_host="45.140.205.4",
+            server_port=51820,
+        )
+        original_timeout = reachability._AMNEZIAWG_HANDSHAKE_TIMEOUT_SECONDS
+        original_poll = reachability._RUNTIME_HANDSHAKE_POLL_INTERVAL_SECONDS
+        original_traffic = reachability._RUNTIME_HANDSHAKE_TRAFFIC_INTERVAL_SECONDS
+        original_stimulate = reachability._stimulate_runtime_handshake
+        reachability._AMNEZIAWG_HANDSHAKE_TIMEOUT_SECONDS = 0.05
+        reachability._RUNTIME_HANDSHAKE_POLL_INTERVAL_SECONDS = 0.01
+        reachability._RUNTIME_HANDSHAKE_TRAFFIC_INTERVAL_SECONDS = 0.01
+        reachability._stimulate_runtime_handshake = lambda: None
+        try:
+            result = window._run_tcp_probe(entry)
+        finally:
+            reachability._AMNEZIAWG_HANDSHAKE_TIMEOUT_SECONDS = original_timeout
+            reachability._RUNTIME_HANDSHAKE_POLL_INTERVAL_SECONDS = original_poll
+            reachability._RUNTIME_HANDSHAKE_TRAFFIC_INTERVAL_SECONDS = original_traffic
+            reachability._stimulate_runtime_handshake = original_stimulate
+
+        self.assertEqual(result.status, ReachabilityState.NOT_APPLICABLE)
+        self.assertEqual(result.error_category, "handshake_observation_limited")
+        self.assertIn("handshake", result.failure_reason.lower())
 
     def test_hysteria2_probe_uses_runtime_activity_check(self) -> None:
         runtime_manager = RuntimeManager(self.db, adapters=[FakeHysteriaAdapter()])

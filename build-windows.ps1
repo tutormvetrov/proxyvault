@@ -2,11 +2,23 @@ param(
     [switch]$SkipAudit,
     [switch]$SkipTests,
     [switch]$IncludeLocalData,
-    [string]$PortableSourceDir
+    [string]$PortableSourceDir,
+    [switch]$NoPauseOnError
 )
 
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
+
+trap {
+    Write-Host ""
+    Write-Host "ProxyVault Windows build failed:" -ForegroundColor Red
+    Write-Host $_.Exception.Message -ForegroundColor Red
+    if (-not $NoPauseOnError) {
+        Write-Host ""
+        Read-Host "Press Enter to close this window"
+    }
+    exit 1
+}
 
 function Invoke-Checked {
     param(
@@ -80,6 +92,7 @@ function Assert-FileExists {
 }
 
 $root = (Get-Location).Path
+$python = Join-Path $root ".venv\Scripts\python.exe"
 $releaseDir = Join-Path $root "release"
 $stageDir = Join-Path $releaseDir "ProxyVault-win-x64"
 $archivePath = Join-Path $releaseDir "ProxyVault-win-x64.zip"
@@ -118,8 +131,12 @@ $repoAmneziaWGWintun = Join-Path $root "engines\amneziawg\windows\AmneziaWG\wint
 $repoThirdPartyNotices = Join-Path $root "tools\runtime_assets\THIRD_PARTY_NOTICES.md"
 $repoLicenseReadme = Join-Path $root "tools\runtime_assets\LICENSES\README.md"
 
-Invoke-Checked { python -m pip install -r requirements-build.txt }
-Invoke-Checked { python ".\tools\runtime_assets\bootstrap_runtime_assets.py" --target windows --rebuild-helper }
+if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
+    python -m venv .venv
+}
+
+Invoke-Checked { & $python -m pip install -r requirements-build.txt }
+Invoke-Checked { & $python ".\tools\runtime_assets\bootstrap_runtime_assets.py" --target windows --rebuild-helper }
 
 Assert-FileExists -LiteralPath $repoSingBox -Description "Bundled sing-box executable"
 Assert-FileExists -LiteralPath $repoCronet -Description "Bundled libcronet.dll"
@@ -134,7 +151,7 @@ Assert-FileExists -LiteralPath $repoThirdPartyNotices -Description "Third-party 
 Assert-FileExists -LiteralPath $repoLicenseReadme -Description "Third-party license bundle"
 
 Invoke-Checked {
-    python -c "from app.runtime.paths import resolve_sing_box_asset_layout, sing_box_support_asset_names; resolve_sing_box_asset_layout(platform_name='windows', required_support_files=sing_box_support_asset_names('windows')); print('Validated bundled sing-box assets for Windows.')"
+    & $python -c "from app.runtime.paths import resolve_sing_box_asset_layout, sing_box_support_asset_names; resolve_sing_box_asset_layout(platform_name='windows', required_support_files=sing_box_support_asset_names('windows')); print('Validated bundled sing-box assets for Windows.')"
 }
 
 if (-not $SkipAudit) {
@@ -147,14 +164,14 @@ if (-not $SkipAudit) {
             }
         }
     }
-    Invoke-Checked { python @auditArgs }
+    Invoke-Checked { & $python @auditArgs }
 }
 
 if (-not $SkipTests) {
-    Invoke-Checked { python ".\tools\run_unittest_shards.py" --root tests --verbose }
+    Invoke-Checked { & $python ".\tools\run_unittest_shards.py" --root tests --verbose }
 }
 
-Invoke-ProcessChecked -FilePath "python" -ArgumentList @(
+Invoke-ProcessChecked -FilePath $python -ArgumentList @(
     "-m",
     "PyInstaller",
     "--noconfirm",
@@ -168,7 +185,7 @@ Invoke-ProcessChecked -FilePath "python" -ArgumentList @(
 
 New-Item -ItemType Directory -Path $stageDir -Force | Out-Null
 Copy-Item -Path (Join-Path $distDir "ProxyVault\*") -Destination $stageDir -Recurse -Force
-Invoke-Checked { python ".\tools\release_bundle.py" copy-payload --platform windows --stage-dir $stageDir }
+Invoke-Checked { & $python ".\tools\release_bundle.py" copy-payload --platform windows --stage-dir $stageDir }
 Set-Content -LiteralPath $portableMarker -Value "" -NoNewline
 
 $stagedSingBox = Join-Path $stageDir "engines\sing-box\windows\sing-box.exe"
@@ -194,7 +211,7 @@ Assert-FileExists -LiteralPath $stagedAmneziaWGAwg -Description "Staged awg.exe"
 Assert-FileExists -LiteralPath $stagedAmneziaWGWintun -Description "Staged AmneziaWG wintun.dll"
 Assert-FileExists -LiteralPath $stagedThirdPartyNotices -Description "Staged third-party notices bundle"
 Assert-FileExists -LiteralPath $stagedLicenseReadme -Description "Staged third-party license bundle"
-Invoke-Checked { python ".\tools\release_bundle.py" validate-stage --platform windows --stage-dir $stageDir }
+Invoke-Checked { & $python ".\tools\release_bundle.py" validate-stage --platform windows --stage-dir $stageDir }
 
 if ($IncludeLocalData) {
     if (-not $resolvedPortableSourceDir) {
@@ -210,7 +227,7 @@ if ($IncludeLocalData) {
     }
 }
 else {
-    Write-Host "Staging a clean Windows release without local data. Use -IncludeLocalData to bundle portable seed data explicitly."
+    Write-Host "Staging Windows release. Private portable-seed payload is bundled when present."
 }
 
 if (-not (Test-Path (Join-Path $stageDir "qrcodes"))) {
@@ -225,7 +242,7 @@ if (-not $IncludeLocalData) {
 }
 
 Compress-Archive -LiteralPath $stageDir -DestinationPath $archivePath -Force
-Invoke-Checked { python ".\tools\release_bundle.py" validate-archive --platform windows --archive-path $archivePath }
+Invoke-Checked { & $python ".\tools\release_bundle.py" validate-archive --platform windows --archive-path $archivePath }
 
 $hashLines = @()
 Get-ChildItem -Path $releaseDir -Filter "*.zip" | Sort-Object Name | ForEach-Object {

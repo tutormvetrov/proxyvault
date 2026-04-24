@@ -34,6 +34,22 @@ class RuntimePresentation:
 
 EXTRA_UI_CATALOGS: dict[SupportedLocale, dict[str, str]] = {
     SupportedLocale.RU: {
+        "startup.seed_choice.title": "\u041f\u0435\u0440\u0432\u044b\u0439 \u0437\u0430\u043f\u0443\u0441\u043a ProxyVault",
+        "startup.seed_choice.body": (
+            "\u0412\u044b \u0431\u0443\u0434\u0435\u0442\u0435 \u0438\u0441\u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u044c "
+            "\u0441\u0432\u043e\u0438 \u043a\u043e\u043d\u0444\u0438\u0433\u0443\u0440\u0430\u0446\u0438\u0438 "
+            "\u0438\u043b\u0438 \u043f\u0440\u0435\u0434\u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u043d\u044b\u0435?\n\n"
+            "\u0414\u043b\u044f \u043f\u0440\u0435\u0434\u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u043d\u044b\u0445 "
+            "\u043f\u0440\u043e\u0444\u0438\u043b\u0435\u0439 \u043f\u043e\u043d\u0430\u0434\u043e\u0431\u0438\u0442\u0441\u044f "
+            "\u043c\u0430\u0441\u0442\u0435\u0440-\u043f\u0430\u0440\u043e\u043b\u044c, \u043a\u043e\u0442\u043e\u0440\u044b\u0439 "
+            "\u0432\u044b \u043f\u043e\u043b\u0443\u0447\u0438\u043b\u0438 \u0432\u043c\u0435\u0441\u0442\u0435 \u0441\u043e "
+            "\u0441\u0431\u043e\u0440\u043a\u043e\u0439."
+        ),
+        "startup.seed_choice.use_preinstalled": "\u041f\u0440\u0435\u0434\u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u043d\u044b\u0435",
+        "startup.seed_choice.use_own": "\u0421\u0432\u043e\u0438 \u043a\u043e\u043d\u0444\u0438\u0433\u0443\u0440\u0430\u0446\u0438\u0438",
+        "startup.seed_choice.copy_failed_title": "\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u0438\u0442\u044c \u043f\u0440\u0435\u0434\u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u043d\u044b\u0435 \u043f\u0440\u043e\u0444\u0438\u043b\u0438",
+        "startup.seed_choice.copy_failed_body": "Seed-\u0431\u0430\u0437\u0430 \u043d\u0430\u0439\u0434\u0435\u043d\u0430, \u043d\u043e ProxyVault \u043d\u0435 \u0441\u043c\u043e\u0433 \u0441\u043a\u043e\u043f\u0438\u0440\u043e\u0432\u0430\u0442\u044c \u0435\u0435 \u0432 \u0440\u0430\u0431\u043e\u0447\u0443\u044e \u043f\u0430\u043f\u043a\u0443.",
+        "startup.seed_password.title": "\u041f\u0430\u0440\u043e\u043b\u044c \u0434\u043b\u044f \u043f\u0440\u0435\u0434\u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u043d\u044b\u0445 \u043f\u0440\u043e\u0444\u0438\u043b\u0435\u0439",
         "action.help_center": "Открыть справку",
         "action.copy_local_http": "Скопировать локальный HTTP-адрес",
         "action.copy_local_socks": "Скопировать локальный SOCKS-адрес",
@@ -288,6 +304,16 @@ EXTRA_UI_CATALOGS: dict[SupportedLocale, dict[str, str]] = {
     }
     | MICROCOPY_RU,
     SupportedLocale.EN: {
+        "startup.seed_choice.title": "First Launch",
+        "startup.seed_choice.body": (
+            "Will you use your own configurations or the preinstalled ones?\n\n"
+            "Preinstalled profiles require the master password you received with this build."
+        ),
+        "startup.seed_choice.use_preinstalled": "Preinstalled",
+        "startup.seed_choice.use_own": "My Configs",
+        "startup.seed_choice.copy_failed_title": "Could Not Install Preinstalled Profiles",
+        "startup.seed_choice.copy_failed_body": "The seed database was found, but ProxyVault could not copy it into the working folder.",
+        "startup.seed_password.title": "Password for Preinstalled Profiles",
         "action.help_center": "Open Help",
         "action.copy_local_http": "Copy Local HTTP Address",
         "action.copy_local_socks": "Copy Local SOCKS Address",

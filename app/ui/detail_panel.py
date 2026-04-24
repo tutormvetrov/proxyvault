@@ -78,7 +78,7 @@ class DetailPanel(QWidget):
         self.clear_panel()
 
     def _build_ui(self) -> None:
-        self.setMinimumWidth(360)
+        self.setMinimumWidth(0)
         self.setMaximumWidth(560)
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -90,6 +90,7 @@ class DetailPanel(QWidget):
         outer.addWidget(self.scroll)
 
         self.content = QWidget()
+        self.content.setMinimumWidth(340)
         self.scroll.setWidget(self.content)
         layout = QVBoxLayout(self.content)
         layout.setContentsMargins(14, 14, 14, 14)
@@ -739,7 +740,7 @@ class DetailPanel(QWidget):
         self.original_pixmap = QPixmap()
         if entry.uri and not entry.is_locked:
             self.original_pixmap = qr_pixmap(entry.uri, self.current_options, max_size=720)
-        elif entry.qr_png_path and Path(entry.qr_png_path).exists():
+        elif not entry.is_locked and entry.qr_png_path and Path(entry.qr_png_path).exists():
             self.original_pixmap = QPixmap(entry.qr_png_path)
         if self.original_pixmap.isNull():
             self.qr_label.setObjectName("emptyQrState")

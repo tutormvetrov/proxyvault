@@ -231,6 +231,7 @@ CATALOG_EN: dict[str, str] = {
     "reachability.reason.runtime_failure_default": "The runtime/handshake check did not confirm a working connection.",
     "reachability.reason.success": "Probe succeeded.",
     "reachability.reason.runtime_success": "The configuration passed the runtime check.",
+    "reachability.reason.runtime_observation_limited": "Runtime started, but handshake visibility is limited.",
     "reachability.reason.no_detail": "No detail",
     "reachability.details.none": "No diagnostics are available yet.",
     "reachability.details.not_applicable": (
@@ -245,6 +246,11 @@ CATALOG_EN: dict[str, str] = {
     "reachability.details.runtime_success_existing": (
         "There is already an active session for \"{name}\". The runtime shows a handshake with {endpoint}, "
         "so the current configuration is treated as working."
+    ),
+    "reachability.details.runtime_observation_limited": (
+        "The \"{name}\" profile started a tunnel for {endpoint}, but Windows did not allow ProxyVault "
+        "to read the latest handshake without elevated access. The tunnel was not treated as crashed. "
+        "Generate traffic through the tunnel or run ProxyVault as administrator if you need direct handshake confirmation."
     ),
     "reachability.details.runtime_failure": (
         "{title}\n\n{summary}\n\nWhat to do next: {action}\n\nTechnical details:\n{technical_detail}"

@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from app.db import DatabaseManager, harden_private_storage_paths
+from app.db import AuthenticationError, DatabaseManager, harden_private_storage_paths
 from app.models import ProxyEntry, ProxyType, ReachabilityCheck, ReachabilityState, utc_now_iso
 
 
@@ -119,6 +119,52 @@ class DatabaseTests(unittest.TestCase):
         self.assertEqual(locked_entry.uri, "")
 
         self.db.unlock("correct horse battery staple")
+        unlocked_entry = self.db.get_entry(entry.id, include_uri=True)
+        self.assertIsNotNone(unlocked_entry)
+        assert unlocked_entry is not None
+        self.assertEqual(unlocked_entry.uri, entry.uri)
+
+    def test_change_master_password_uses_existing_unlocked_session(self) -> None:
+        self.db.set_master_password("old password")
+        entry = ProxyEntry(
+            id="entry-session-change",
+            name="Session Change",
+            uri="ss://YWVzLTEyOC1nY206c2VjcmV0@ss.example.com:8388#Session",
+            type=ProxyType.SHADOWSOCKS,
+            transport="tcp",
+            server_host="ss.example.com",
+            server_port=8388,
+        )
+        self.db.save_entry(entry)
+
+        self.db.change_master_password("", "new password")
+        self.db.lock()
+
+        with self.assertRaises(AuthenticationError):
+            self.db.unlock("old password")
+
+        self.db.unlock("new password")
+        unlocked_entry = self.db.get_entry(entry.id, include_uri=True)
+        self.assertIsNotNone(unlocked_entry)
+        assert unlocked_entry is not None
+        self.assertEqual(unlocked_entry.uri, entry.uri)
+
+    def test_remove_master_password_uses_existing_unlocked_session(self) -> None:
+        self.db.set_master_password("current password")
+        entry = ProxyEntry(
+            id="entry-session-remove",
+            name="Session Remove",
+            uri="trojan://secret@example.com:443#SessionRemove",
+            type=ProxyType.TROJAN,
+            transport="tcp+tls",
+            server_host="example.com",
+            server_port=443,
+        )
+        self.db.save_entry(entry)
+
+        self.db.remove_master_password()
+
+        self.assertFalse(self.db.has_master_password())
         unlocked_entry = self.db.get_entry(entry.id, include_uri=True)
         self.assertIsNotNone(unlocked_entry)
         assert unlocked_entry is not None
